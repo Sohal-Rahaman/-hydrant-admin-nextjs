@@ -1,0 +1,15 @@
+# Railway Environment Variables Template
+# Copy these to Railway dashboard under "Variables" tab
+
+NEXT_PUBLIC_FIREBASE_API_KEY=your_firebase_api_key_here
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project_id.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id_here
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project_id.appspot.com
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_messaging_sender_id_here
+NEXT_PUBLIC_FIREBASE_APP_ID=your_firebase_app_id_here
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
+
+# Instructions:
+# 1. Copy your values from your local .env.local file
+# 2. Paste each one in Railway's Variables section
+# 3. Make sure to use the exact same variable names

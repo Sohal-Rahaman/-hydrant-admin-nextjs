@@ -6,7 +6,10 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "export": "next build && next export",
+    "deploy:github": "npm run export && gh-pages -d out",
+    "deploy:surge": "npm run export && surge out"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^1.16.10",
