@@ -98,7 +98,7 @@ export const getActiveSubscriptions = () => {
 
 interface OrderData {
   status: string;
-  createdAt: Date;
+  createdAt: Date | { toDate: () => Date } | string | number;
   userId: string;
   address?: {
     pincode: string;

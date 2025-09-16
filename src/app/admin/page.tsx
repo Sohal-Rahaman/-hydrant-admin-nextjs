@@ -572,7 +572,7 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
     };
   }, []);
 
-  const calculateStats = (ordersData: any[], usersData: any[]) => {
+  const calculateStats = (ordersData: OrderData[], usersData: UserData[]) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -580,13 +580,13 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
 
     // Filter today's orders
     const todayOrders = ordersData.filter(order => {
-      const orderDate = order.createdAt?.toDate ? order.createdAt.toDate() : new Date(order.createdAt || Date.now());
+      const orderDate = toDate(order.createdAt);
       return orderDate >= today && orderDate < tomorrow;
     });
 
     // Filter new customers today (joined within 24 hours)
     const newCustomersToday = usersData.filter(user => {
-      const joinDate = user.createdAt?.toDate ? user.createdAt.toDate() : new Date(user.createdAt || Date.now());
+      const joinDate = toDate(user.createdAt);
       return joinDate >= today && joinDate < tomorrow;
     }).length;
 
@@ -983,7 +983,7 @@ Check console for detailed logs`);
                       {order.address?.pincode || 'No pincode'}
                       <FiClock style={{ fontSize: '0.8rem' }} />
                       {order.createdAt ? 
-                        new Date(order.createdAt?.toDate?.() || order.createdAt).toLocaleDateString() : 
+                        toDate(order.createdAt).toLocaleDateString() : 
                         'No date'
                       }
                     </OrderDetails>
