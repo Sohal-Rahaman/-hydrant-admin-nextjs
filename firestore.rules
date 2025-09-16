@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    // Allow users to read and write their own user data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid == userId || isAdmin());
+    }
+    
+    // Allow users to read and write their own orders, but admins can read all
+    match /orders/{orderId} {
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write, update: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+    }
+    
+    // Allow users to read and write their own addresses, but admins can read all
+    match /addresses/{addressId} {
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write, update, delete: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+    }
+    
+    // Allow users to read and write their own cart items, but admins can read all
+    match /cart/{cartId} {
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write, update, delete: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+    }
+    
+    // Allow users to read and write their own subscriptions, but admins can read all
+    match /subscriptions/{subscriptionId} {
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write, update: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+    }
+    
+    // Allow read access to counters for order ID generation
+    match /counters/{counterId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Allow read access to products (public data)
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin(); // Only admins should write products
+    }
+    
+    // Dashboard stats collection - allow admins to read/write, regular users to read
+    match /dashboard_stats/{document} {
+      allow read: if request.auth != null; // All authenticated users can read dashboard stats
+      allow write: if isAdmin(); // Only admins can write dashboard stats
+    }
+    
+    // Hold jars collection - allow users to read/write their own, admins can access all
+    match /holdJars/{document} {
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write, update, delete: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+    }
+  }
+}
