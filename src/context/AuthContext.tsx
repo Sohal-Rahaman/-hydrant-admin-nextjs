@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { auth, getUserData, signInWithGoogle, signInWithEmail, logOut } from '@/lib/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged, User, UserCredential } from 'firebase/auth';
 
 interface UserData {
   id: string;
@@ -15,8 +15,8 @@ interface UserData {
   walletBalance?: number;
   occupiedJars?: number;
   coins?: number;
-  createdAt?: any;
-  updatedAt?: any;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
 }
 
 interface AuthContextType {
@@ -24,8 +24,8 @@ interface AuthContextType {
   userData: UserData | null;
   isAdmin: boolean;
   loading: boolean;
-  signIn: () => Promise<any>;
-  signInWithEmailPassword: (email: string, password: string) => Promise<any>;
+  signIn: () => Promise<UserCredential>;
+  signInWithEmailPassword: (email: string, password: string) => Promise<UserCredential>;
   signOut: () => Promise<void>;
   checkAdminPrivileges: (user: User | null) => Promise<boolean>;
 }

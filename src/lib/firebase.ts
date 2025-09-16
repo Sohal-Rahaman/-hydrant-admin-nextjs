@@ -1,7 +1,7 @@
 // Firebase configuration and initialization for Next.js
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, QuerySnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 const firebaseConfig = {
@@ -38,16 +38,16 @@ export const placeNewOrder = httpsCallable(functions, 'placeNewOrder');
 // Firestore helper functions
 export const getCollection = (collectionName: string) => collection(db, collectionName);
 export const getDocument = (collectionName: string, docId: string) => doc(db, collectionName, docId);
-export const addDocument = (collectionName: string, data: any) => addDoc(collection(db, collectionName), data);
-export const updateDocument = (collectionName: string, docId: string, data: any) => updateDoc(doc(db, collectionName, docId), data);
+export const addDocument = (collectionName: string, data: DocumentData) => addDoc(collection(db, collectionName), data);
+export const updateDocument = (collectionName: string, docId: string, data: Partial<DocumentData>) => updateDoc(doc(db, collectionName, docId), data);
 export const deleteDocument = (collectionName: string, docId: string) => deleteDoc(doc(db, collectionName, docId));
 
 // Real-time listeners with error handling
 export const subscribeToCollection = (
   collectionName: string, 
-  callback: (snapshot: any) => void, 
-  queryConstraints: any[] = [],
-  errorCallback?: (error: any) => void
+  callback: (snapshot: QuerySnapshot<DocumentData>) => void, 
+  queryConstraints: QueryConstraint[] = [],
+  errorCallback?: (error: Error) => void
 ) => {
   console.log(`🔗 Setting up subscription for collection: ${collectionName}`);
   const collectionRef = collection(db, collectionName);
@@ -96,15 +96,44 @@ export const getActiveSubscriptions = () => {
   return getDocs(query(collection(db, 'subscriptions'), where('isActive', '==', true)));
 };
 
+interface OrderData {
+  status: string;
+  createdAt: Date;
+  userId: string;
+  address?: {
+    pincode: string;
+  };
+}
+
 // Analytics helper functions
-export const calculateRevenue = (orders: any[]) => {
+export const calculateRevenue = (orders: OrderData[]) => {
   const completedOrders = orders.filter(order => order.status === 'completed');
   const cancelledOrders = orders.filter(order => order.status === 'cancelled');
   return (completedOrders.length - cancelledOrders.length) * 37; // ₹37 per jar
 };
 
-export const getPincodeAnalytics = (orders: any[]) => {
-  const analytics: any = {};
+interface PincodeAnalyticsTemp {
+  [pincode: string]: {
+    totalOrders: number;
+    completedOrders: number;
+    cancelledOrders: number;
+    revenue: number;
+    uniqueCustomers: Set<string>;
+  };
+}
+
+interface PincodeAnalytics {
+  [pincode: string]: {
+    totalOrders: number;
+    completedOrders: number;
+    cancelledOrders: number;
+    revenue: number;
+    uniqueCustomers: number;
+  };
+}
+
+export const getPincodeAnalytics = (orders: OrderData[]): PincodeAnalytics => {
+  const analytics: PincodeAnalyticsTemp = {};
   orders.forEach(order => {
     const pincode = order.address?.pincode || 'unknown';
     if (!analytics[pincode]) {
@@ -113,7 +142,7 @@ export const getPincodeAnalytics = (orders: any[]) => {
         completedOrders: 0,
         cancelledOrders: 0,
         revenue: 0,
-        uniqueCustomers: new Set()
+        uniqueCustomers: new Set<string>()
       };
     }
     analytics[pincode].totalOrders++;
@@ -128,17 +157,30 @@ export const getPincodeAnalytics = (orders: any[]) => {
     analytics[pincode].uniqueCustomers.add(order.userId);
   });
   
-  // Convert Set to count
+  // Convert Set to count and return proper analytics
+  const finalAnalytics: PincodeAnalytics = {};
   Object.keys(analytics).forEach(pincode => {
-    analytics[pincode].uniqueCustomers = analytics[pincode].uniqueCustomers.size;
+    finalAnalytics[pincode] = {
+      ...analytics[pincode],
+      uniqueCustomers: analytics[pincode].uniqueCustomers.size
+    };
   });
   
-  return analytics;
+  return finalAnalytics;
 };
 
+interface Coordinates {
+  lat: number;
+  lng: number;
+}
+
+interface BaseCoordinates {
+  [pincode: string]: Coordinates;
+}
+
 // Smart coordinate generation for map markers
-export const generateSmartCoordinates = (pincode: string, orderNumber: number) => {
-  const baseCoordinates: any = {
+export const generateSmartCoordinates = (pincode: string, orderNumber: number): Coordinates => {
+  const baseCoordinates: BaseCoordinates = {
     '700030': { lat: 22.6441, lng: 88.4290 }, // Dum Dum area
     '700074': { lat: 22.5792, lng: 88.4337 }, // Salt Lake area
     'default': { lat: 22.5726, lng: 88.3639 } // Kolkata center
@@ -163,7 +205,7 @@ export const generateCustomerId = () => {
 };
 
 // Ensure user has customer ID
-export const ensureCustomerId = async (userId: string, userData: any) => {
+export const ensureCustomerId = async (userId: string, userData: DocumentData) => {
   if (!userData.customerId) {
     const customerId = generateCustomerId();
     await updateDocument('users', userId, { customerId });

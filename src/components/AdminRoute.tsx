@@ -174,9 +174,10 @@ const AdminRoute: React.FC<AdminRouteProps> = ({ children }) => {
 
     try {
       await signInWithEmailPassword(email, password);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Login error:', error);
-      setError(error.message || 'Login failed. Please check your credentials.');
+      const errorMessage = error instanceof Error ? error.message : 'Login failed. Please check your credentials.';
+      setError(errorMessage);
     } finally {
       setLoginLoading(false);
     }
@@ -188,9 +189,10 @@ const AdminRoute: React.FC<AdminRouteProps> = ({ children }) => {
 
     try {
       await signIn();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Google login error:', error);
-      setError(error.message || 'Google login failed.');
+      const errorMessage = error instanceof Error ? error.message : 'Google login failed.';
+      setError(errorMessage);
     } finally {
       setLoginLoading(false);
     }
@@ -269,7 +271,7 @@ const AdminRoute: React.FC<AdminRouteProps> = ({ children }) => {
     return (
       <LoginContainer>
         <h1>Access Denied</h1>
-        <p>You don't have admin privileges to access this dashboard.</p>
+        <p>You don&apos;t have admin privileges to access this dashboard.</p>
         <p>Please contact the system administrator.</p>
       </LoginContainer>
     );

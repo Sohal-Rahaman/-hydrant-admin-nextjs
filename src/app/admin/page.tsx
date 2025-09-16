@@ -322,11 +322,47 @@ export default function AdminDashboard() {
     totalRevenue: 0
   });
   
-  const [orders, setOrders] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [subscriptions, setSubscriptions] = useState<any[]>([]);
-  const [pincodeAnalytics, setPincodeAnalytics] = useState<any>({});
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+interface OrderData {
+  id: string;
+  createdAt: Date | { toDate: () => Date } | string | number;
+  status: string;
+  quantity: number;
+  amount: number;
+  items?: Array<{ quantity: number }>;
+  total?: number;
+  customerName?: string;
+  deliveryAddress?: string;
+  userId: string;
+  address?: {
+    pincode: string;
+  };
+}
+
+interface UserData {
+  id: string;
+  createdAt: Date | { toDate: () => Date } | string | number;
+  signupDate?: Date | { toDate: () => Date } | string | number;
+  registeredAt?: Date | { toDate: () => Date } | string | number;
+}
+
+interface SubscriptionData {
+  id: string;
+  isActive: boolean;
+}
+
+// Helper function to convert various date formats to Date object
+const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Date => {
+  if (!dateValue) return new Date();
+  if (dateValue instanceof Date) return dateValue;
+  if (typeof dateValue === 'object' && 'toDate' in dateValue) return dateValue.toDate();
+  return new Date(dateValue);
+};
+
+  const [orders, setOrders] = useState<OrderData[]>([]);
+  const [users, setUsers] = useState<UserData[]>([]);
+  const [subscriptions, setSubscriptions] = useState<SubscriptionData[]>([]);
+  const [pincodeAnalytics, setPincodeAnalytics] = useState<Record<string, any>>({});
+  const [recentOrders, setRecentOrders] = useState<OrderData[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string>('');
@@ -412,7 +448,7 @@ export default function AdminDashboard() {
           return;
         }
         
-        const ordersData = snapshot.docs.map((doc: any, index: number) => {
+        const ordersData = snapshot.docs.map((doc, index) => {
           const data = doc.data();
           console.log(`📋 Order ${index + 1} raw data:`, {
             id: doc.id,
@@ -435,26 +471,25 @@ export default function AdminDashboard() {
             quantity: data.items?.[0]?.quantity || data.quantity || 1,
             amount: data.total || data.amount || 37
           };
-        });
+        }) as OrderData[];
         
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         console.log('✅ Processed orders data:', {
           totalOrders: ordersData.length,
-          statuses: ordersData.map((o: any) => o.status),
-          uniqueStatuses: [...new Set(ordersData.map((o: any) => o.status))],
-          pendingCount: ordersData.filter((o: any) => o.status === 'pending').length,
-          processingCount: ordersData.filter((o: any) => o.status === 'processing').length,
-          deliveredCount: ordersData.filter((o: any) => o.status === 'delivered').length,
-          completedCount: ordersData.filter((o: any) => o.status === 'completed').length,
-          cancelledCount: ordersData.filter((o: any) => o.status === 'cancelled').length
+          statuses: ordersData.map(o => o.status),
+          uniqueStatuses: [...new Set(ordersData.map(o => o.status))],
+          pendingCount: ordersData.filter(o => o.status === 'pending').length,
+          processingCount: ordersData.filter(o => o.status === 'processing').length,
+          deliveredCount: ordersData.filter(o => o.status === 'delivered').length,
+          completedCount: ordersData.filter(o => o.status === 'completed').length,
+          cancelledCount: ordersData.filter(o => o.status === 'cancelled').length
         });
         
         setOrders(ordersData);
         
         // Set recent orders (last 10)
         const sortedOrders = [...ordersData].sort((a, b) => {
-          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
-          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
+          const dateA = toDate(a.createdAt);
+          const dateB = toDate(b.createdAt);
           return dateB.getTime() - dateA.getTime();
         });
         setRecentOrders(sortedOrders.slice(0, 10));
@@ -487,11 +522,11 @@ export default function AdminDashboard() {
           return;
         }
         
-        const usersData = snapshot.docs.map((doc: any) => ({
+        const usersData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
           createdAt: doc.data().createdAt || doc.data().signupDate || doc.data().registeredAt || new Date()
-        }));
+        })) as UserData[];
         
         console.log('✅ Processed users data:', {
           totalUsers: usersData.length,
@@ -513,11 +548,11 @@ export default function AdminDashboard() {
     // Subscribe to subscriptions collection
     const unsubscribeSubscriptions = subscribeToCollection('subscriptions', (snapshot) => {
       try {
-        const subscriptionsData = snapshot.docs.map((doc: any) => ({
+        const subscriptionsData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
-        }));
-        setSubscriptions(subscriptionsData.filter((sub: any) => sub.isActive));
+        })) as SubscriptionData[];
+        setSubscriptions(subscriptionsData.filter(sub => sub.isActive));
       } catch (error) {
         console.error('Error processing subscriptions:', error);
       }
@@ -555,7 +590,7 @@ export default function AdminDashboard() {
       return joinDate >= today && joinDate < tomorrow;
     }).length;
 
-    // Calculate Today's Revenue: (today total order quantity - today cancelled orders) * 37
+    // Calculate Today&apos;s Revenue: (today total order quantity - today cancelled orders) * 37
     const todayDeliveredOrders = todayOrders.filter(order => order.status === 'delivered');
     const todayDeliveredQuantity = todayDeliveredOrders.reduce((sum, order) => {
       return sum + (order.quantity || order.items?.[0]?.quantity || 1);
@@ -732,7 +767,7 @@ Check console for detailed logs`);
         <div>
           <strong>📊 Live Dashboard - Real-Time KPI from Firebase dashboard_stats Collection:</strong>
           <br />• <strong>Data Source:</strong> Firebase collection 'dashboard_stats/live_metrics' document
-          <br />• <strong>Today's Revenue:</strong> Today's delivered orders quantity × ₹37 per jar
+          <br />• <strong>Today&apos;s Revenue:</strong> Today&apos;s delivered orders quantity × ₹37 per jar
           <br />• <strong>Processing Orders:</strong> Orders with pending or processing status (excludes cancelled/delivered)
           <br />• <strong>New Customers Today:</strong> Users who joined within the last 24 hours
           <br />• <strong>Total Orders:</strong> All orders (open + cancelled + delivered)
@@ -752,7 +787,7 @@ Check console for detailed logs`);
           <StatHeader>
             <div>
               <StatValue>₹{stats.revenue}</StatValue>
-              <StatLabel>Today's Revenue</StatLabel>
+              <StatLabel>Today&apos;s Revenue</StatLabel>
               <StatTrend>
                 <FiTrendingUp />
                 Delivered orders × ₹37

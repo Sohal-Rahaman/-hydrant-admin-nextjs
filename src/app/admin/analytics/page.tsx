@@ -225,9 +225,53 @@ const COLORS = {
 
 const PIE_COLORS = ['#8e2de2', '#4a00e0', '#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
 
+interface OrderData {
+  id: string;
+  createdAt: Date | { toDate: () => Date } | string | number;
+  status: string;
+  quantity: number;
+  amount: number;
+  items?: Array<{ quantity: number }>;
+  total?: number;
+}
+
+interface UserData {
+  id: string;
+  createdAt: Date | { toDate: () => Date } | string | number;
+}
+
+interface DailyData {
+  date: string;
+  orders: number;
+  quantity: number;
+  revenue: number;
+  delivered: number;
+}
+
+interface StatusData {
+  name: string;
+  value: number;
+  percentage: string;
+  [key: string]: string | number; // Index signature for Chart compatibility
+}
+
+interface RevenueData {
+  date: string;
+  revenue: number;
+  orders: number;
+}
+
+// Helper function to convert various date formats to Date object
+const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Date => {
+  if (!dateValue) return new Date();
+  if (dateValue instanceof Date) return dateValue;
+  if (typeof dateValue === 'object' && 'toDate' in dateValue) return dateValue.toDate();
+  return new Date(dateValue);
+};
+
 export default function AnalyticsPage() {
-  const [orders, setOrders] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
+  const [orders, setOrders] = useState<OrderData[]>([]);
+  const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     todayRevenue: 0,
@@ -237,9 +281,9 @@ export default function AnalyticsPage() {
     totalUsers: 0,
     totalRevenue: 0
   });
-  const [dailyOrdersData, setDailyOrdersData] = useState<any[]>([]);
-  const [orderStatusData, setOrderStatusData] = useState<any[]>([]);
-  const [revenueData, setRevenueData] = useState<any[]>([]);
+  const [dailyOrdersData, setDailyOrdersData] = useState<DailyData[]>([]);
+  const [orderStatusData, setOrderStatusData] = useState<StatusData[]>([]);
+  const [revenueData, setRevenueData] = useState<RevenueData[]>([]);
 
   useEffect(() => {
     setLoading(true);
@@ -273,14 +317,14 @@ export default function AnalyticsPage() {
 
     // Subscribe to orders
     const unsubscribeOrders = subscribeToCollection('orders', (snapshot) => {
-      const ordersData = snapshot.docs.map((doc: any) => ({
+      const ordersData = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
         createdAt: doc.data().createdAt || new Date(),
         status: doc.data().status || 'pending',
         quantity: doc.data().items?.[0]?.quantity || doc.data().quantity || 1,
         amount: doc.data().total || doc.data().amount || 37
-      }));
+      })) as OrderData[];
       
       setOrders(ordersData);
       processOrdersData(ordersData, users);
@@ -288,11 +332,11 @@ export default function AnalyticsPage() {
 
     // Subscribe to users
     const unsubscribeUsers = subscribeToCollection('users', (snapshot) => {
-      const usersData = snapshot.docs.map((doc: any) => ({
+      const usersData = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
         createdAt: doc.data().createdAt || new Date()
-      }));
+      })) as UserData[];
       
       setUsers(usersData);
       processOrdersData(orders, usersData);
@@ -305,9 +349,9 @@ export default function AnalyticsPage() {
       unsubscribeOrders();
       unsubscribeUsers();
     };
-  }, []);
+  }, [orders, users]);
 
-  const processOrdersData = (ordersData: any[], usersData: any[]) => {
+  const processOrdersData = (ordersData: OrderData[], usersData: UserData[]) => {
     // Calculate KPI stats
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -316,17 +360,17 @@ export default function AnalyticsPage() {
 
     // Filter today's orders
     const todayOrders = ordersData.filter(order => {
-      const orderDate = order.createdAt?.toDate ? order.createdAt.toDate() : new Date(order.createdAt || Date.now());
+      const orderDate = toDate(order.createdAt);
       return orderDate >= today && orderDate < tomorrow;
     });
 
     // New customers today
     const newCustomersToday = usersData.filter(user => {
-      const joinDate = user.createdAt?.toDate ? user.createdAt.toDate() : new Date(user.createdAt || Date.now());
+      const joinDate = toDate(user.createdAt);
       return joinDate >= today && joinDate < tomorrow;
     }).length;
 
-    // Today's revenue
+    // Today&apos;s revenue
     const todayDeliveredOrders = todayOrders.filter(order => order.status === 'delivered');
     const todayDeliveredQuantity = todayDeliveredOrders.reduce((sum, order) => sum + order.quantity, 0);
     const todayRevenue = todayDeliveredQuantity * 37;
@@ -360,7 +404,7 @@ export default function AnalyticsPage() {
       nextDate.setDate(nextDate.getDate() + 1);
 
       const dayOrders = ordersData.filter(order => {
-        const orderDate = order.createdAt?.toDate ? order.createdAt.toDate() : new Date(order.createdAt || Date.now());
+        const orderDate = toDate(order.createdAt);
         return orderDate >= date && orderDate < nextDate;
       });
 
@@ -379,10 +423,10 @@ export default function AnalyticsPage() {
     setDailyOrdersData(dailyData);
 
     // Order status distribution
-    const statusCount = ordersData.reduce((acc, order) => {
+    const statusCount: Record<string, number> = ordersData.reduce((acc, order) => {
       acc[order.status] = (acc[order.status] || 0) + 1;
       return acc;
-    }, {});
+    }, {} as Record<string, number>);
 
     const statusData = Object.entries(statusCount).map(([status, count]) => ({
       name: status.charAt(0).toUpperCase() + status.slice(1),
@@ -441,8 +485,8 @@ export default function AnalyticsPage() {
         <FiActivity />
         <div>
           <strong>📊 Live Analytics - Real-Time KPI Data from Firebase:</strong>
-          <br />• <strong>Data Source:</strong> Firebase collection 'dashboard_stats/live_metrics'
-          <br />• <strong>Today's Revenue:</strong> Today's delivered orders quantity × ₹37 per jar
+          <br />• <strong>Data Source:</strong> Firebase collection &apos;dashboard_stats/live_metrics&apos;
+          <br />• <strong>Today&apos;s Revenue:</strong> Today&apos;s delivered orders quantity × ₹37 per jar
           <br />• <strong>Processing Orders:</strong> Orders with pending or processing status (excludes cancelled/delivered)
           <br />• <strong>New Customers Today:</strong> Users who joined within the last 24 hours
           <br />• <strong>Total Orders:</strong> All orders (open + cancelled + delivered)
@@ -464,7 +508,7 @@ export default function AnalyticsPage() {
             <FiDollarSign />
           </StatIcon>
           <StatValue>₹{stats.todayRevenue}</StatValue>
-          <StatLabel>Today's Revenue</StatLabel>
+          <StatLabel>Today&apos;s Revenue</StatLabel>
         </StatCard>
 
         <StatCard

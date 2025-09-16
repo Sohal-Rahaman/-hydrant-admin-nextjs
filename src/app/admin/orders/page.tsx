@@ -255,7 +255,7 @@ export default function OrdersPage() {
   const [processing, setProcessing] = useState(false);
   const [activeTab, setActiveTab] = useState<'open' | 'completed' | 'cancelled'>('open');
 
-  const formatDate = (date: any): string => {
+  const formatDate = (date: Date | { toDate(): Date } | string | number | null | undefined): string => {
     if (!date) return 'N/A';
     try {
       if (typeof date === 'string') return new Date(date).toLocaleString();
@@ -292,8 +292,7 @@ export default function OrdersPage() {
         return;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ordersData = snapshot.docs.map((doc: any, index: number) => {
+      const ordersData = snapshot.docs.map((doc, index) => {
         const data = doc.data();
         console.log(`📋 Order ${index + 1}:`, {
           id: doc.id,
@@ -413,8 +412,7 @@ export default function OrdersPage() {
         isEmpty: snapshot.empty
       });
       
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const usersData = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as User[];
       console.log('✅ Processed users data:', usersData.length, 'users');
       setUsers(usersData);
     });
@@ -660,7 +658,7 @@ Click OK to open Google Maps with this exact address.`);
     setProcessing(true);
     try {
       // Try multiple user lookup strategies
-      let user = getUserDetails(selectedOrder.userId);
+      const user = getUserDetails(selectedOrder.userId);
       
       if (!user) {
         console.warn('User not found with userId:', selectedOrder.userId);
