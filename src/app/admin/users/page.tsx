@@ -589,11 +589,14 @@ export default function UsersPage() {
           totalShares: data.totalShares || 0,
           walletBalance: data.walletBalance || 0,
           holdJars: data.holdJars || data.occupiedJars || 0, // Support both field names
-          addresses: legacyAddresses // Store legacy addresses temporarily
+          addresses: legacyAddresses, // Store legacy addresses temporarily
+          totalRevenue: 0, // Will be calculated later
+          totalCans: 0, // Will be calculated later
+          orders: [] // Will be populated later
         };
       });
       console.log('Processed users:', usersData);
-      setUsers(usersData);
+      setUsers(usersData as User[]);
     });
 
     // Subscribe to addresses collection with better error handling
