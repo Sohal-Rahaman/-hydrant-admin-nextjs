@@ -210,7 +210,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Sohal Rahaman**
 - GitHub: [@sohalrahaman](https://github.com/sohalrahaman)
-- Email: [Your Email]
+- Email: sohalrahaman007@gmail.com
+- 
 
 ## 🙏 Acknowledgments
 
