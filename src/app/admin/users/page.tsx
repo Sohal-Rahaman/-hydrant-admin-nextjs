@@ -46,8 +46,8 @@ interface User {
   createdAt: Date | { toDate(): Date } | string;
   totalCoins: number;
   totalShares: number;
-  walletBalance: number;
-  holdJars: number; // Number of jars user currently holds
+  wallet_balance: number;
+  jars_occupied: number; // Number of jars user currently holds
   totalRevenue: number;
   totalCans: number;
   orders: Order[];
@@ -549,62 +549,68 @@ export default function UsersPage() {
   useEffect(() => {
     setLoading(true);
 
-    // Subscribe to users collection
+    // Subscribe to users collection with proper error handling
     const unsubscribeUsers = subscribeToCollection('users', (snapshot) => {
       console.log('Users snapshot received:', snapshot.docs.length, 'documents');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const usersData = snapshot.docs.map((doc: any) => {
-        const data = doc.data();
-        console.log('User document:', doc.id, data);
-        
-        // Check if user has legacy address structure
-        let legacyAddresses: Address[] = [];
-        if (data.address) {
-          legacyAddresses = [{
-            id: `legacy-${doc.id}`,
-            userId: doc.id,
-            type: 'home',
-            street: data.address.street || '',
-            city: data.address.city || '',
-            state: data.address.state || '',
-            pincode: data.address.pincode || '',
-            floor: data.address.floor || '',
-            apartment: data.address.apartment || '',
-            isDefault: true,
-            createdAt: new Date()
-          }];
-          console.log('Found legacy address for user:', doc.id, legacyAddresses);
-        }
-        
-        return {
-          id: doc.id,
-          customerId: data.customerId || generateCustomerId(),
-          name: data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Unknown User',
-          firstName: data.firstName || '', // Keep for legacy support
-          lastName: data.lastName || '', // Keep for legacy support
-          email: data.email || '',
-          phoneNumber: data.phoneNumber || data.phone || '',
-          createdAt: data.createdAt || new Date(),
-          totalCoins: data.totalCoins || 0,
-          totalShares: data.totalShares || 0,
-          walletBalance: data.walletBalance || 0,
-          holdJars: data.holdJars || data.occupiedJars || 0, // Support both field names
-          addresses: legacyAddresses, // Store legacy addresses temporarily
-          totalRevenue: 0, // Will be calculated later
-          totalCans: 0, // Will be calculated later
-          orders: [] // Will be populated later
-        };
-      });
-      console.log('Processed users:', usersData);
-      setUsers(usersData as User[]);
+      try {
+        const usersData = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          console.log('User document:', doc.id, data);
+          
+          // Check if user has legacy address structure
+          let legacyAddresses: Address[] = [];
+          if (data.address) {
+            legacyAddresses = [{
+              id: `legacy-${doc.id}`,
+              userId: doc.id,
+              type: 'home',
+              street: data.address.street || '',
+              city: data.address.city || '',
+              state: data.address.state || '',
+              pincode: data.address.pincode || '',
+              floor: data.address.floor || '',
+              apartment: data.address.apartment || '',
+              isDefault: true,
+              createdAt: new Date()
+            }];
+            console.log('Found legacy address for user:', doc.id, legacyAddresses);
+          }
+          
+          return {
+            id: doc.id,
+            customerId: data.customerId || generateCustomerId(),
+            name: data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Unknown User',
+            firstName: data.firstName || '', // Keep for legacy support
+            lastName: data.lastName || '', // Keep for legacy support
+            email: data.email || '',
+            phoneNumber: data.phoneNumber || data.phone || '',
+            createdAt: data.createdAt || new Date(),
+            totalCoins: data.totalCoins || 0,
+            totalShares: data.totalShares || 0,
+            wallet_balance: data.wallet_balance || data.walletBalance || 0, // Use wallet_balance for user app compatibility
+            jars_occupied: data.jars_occupied || data.holdJars || data.occupiedJars || 0, // Use jars_occupied for user app compatibility
+            addresses: legacyAddresses, // Store legacy addresses temporarily
+            totalRevenue: 0, // Will be calculated later
+            totalCans: 0, // Will be calculated later
+            orders: [] // Will be populated later
+          };
+        });
+        console.log('Processed users:', usersData);
+        setUsers(usersData as User[]);
+      } catch (error) {
+        console.error('Error processing users:', error);
+        setUsers([]);
+      }
+    }, [], (error) => {
+      console.error('Error subscribing to users:', error);
+      setUsers([]);
     });
 
     // Subscribe to addresses collection with better error handling
     const unsubscribeAddresses = subscribeToCollection('addresses', (snapshot) => {
       console.log('Addresses snapshot received:', snapshot.docs.length, 'documents');
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const addressesData = snapshot.docs.map((doc: any) => {
+        const addressesData = snapshot.docs.map((doc) => {
           const data = doc.data();
           console.log('Address document:', doc.id, data);
           
@@ -629,8 +635,7 @@ export default function UsersPage() {
           return address;
         });
         console.log('Total processed addresses:', addressesData.length);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        console.log('Addresses by userId:', addressesData.reduce((acc: any, addr: any) => {
+        console.log('Addresses by userId:', addressesData.reduce((acc, addr) => {
           if (!acc[addr.userId]) acc[addr.userId] = [];
           acc[addr.userId].push(addr);
           return acc;
@@ -640,25 +645,36 @@ export default function UsersPage() {
         console.error('Error processing addresses:', error);
         setAddresses([]);
       }
+    }, [], (error) => {
+      console.error('Error subscribing to addresses:', error);
+      setAddresses([]);
     });
 
-    // Subscribe to orders collection  
+    // Subscribe to orders collection with error handling
     const unsubscribeOrders = subscribeToCollection('orders', (snapshot) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ordersData = snapshot.docs.map((doc: any) => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt || new Date()
-      }));
-      setOrders(ordersData);
+      try {
+        const ordersData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          userId: doc.data().userId || '',
+          status: doc.data().status || 'pending',
+          ...doc.data(),
+          createdAt: doc.data().createdAt || new Date()
+        }));
+        setOrders(ordersData as Order[]);
+      } catch (error) {
+        console.error('Error processing orders:', error);
+        setOrders([]);
+      }
+    }, [], (error) => {
+      console.error('Error subscribing to orders:', error);
+      setOrders([]);
     });
 
-    // Subscribe to subscriptions collection
+    // Subscribe to subscriptions collection with error handling
     const unsubscribeSubscriptions = subscribeToCollection('subscriptions', (snapshot) => {
       console.log('Subscriptions snapshot received:', snapshot.docs.length, 'documents');
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const subscriptionsData = snapshot.docs.map((doc: any) => {
+        const subscriptionsData = snapshot.docs.map((doc) => {
           const data = doc.data();
           console.log('Subscription document:', doc.id, data);
           
@@ -695,6 +711,9 @@ export default function UsersPage() {
         console.error('Error processing subscriptions:', error);
         setSubscriptions([]);
       }
+    }, [], (error) => {
+      console.error('Error subscribing to subscriptions:', error);
+      setSubscriptions([]);
     });
 
     const timer = setTimeout(() => {
@@ -823,8 +842,8 @@ export default function UsersPage() {
         phoneNumber: editedUser.phoneNumber,
         totalCoins: editedUser.totalCoins,
         totalShares: editedUser.totalShares,
-        walletBalance: editedUser.walletBalance,
-        holdJars: editedUser.holdJars,
+        wallet_balance: editedUser.wallet_balance, // Use wallet_balance for user app compatibility
+        jars_occupied: editedUser.jars_occupied, // Use jars_occupied for user app compatibility
         updatedAt: new Date()
       };
       
@@ -833,7 +852,7 @@ export default function UsersPage() {
       setEditMode(false);
       
       // Show success message with real-time update info
-      const message = selectedUser && (editedUser.holdJars !== selectedUser.holdJars || editedUser.walletBalance !== selectedUser.walletBalance)
+      const message = selectedUser && (editedUser.jars_occupied !== selectedUser.jars_occupied || editedUser.wallet_balance !== selectedUser.wallet_balance)
         ? 'User details updated successfully! Hold Jars and Wallet Balance changes will reflect in the user app immediately.'
         : 'User details updated successfully!';
       alert(message);
@@ -1149,7 +1168,7 @@ export default function UsersPage() {
                     <StatLabel>Addresses</StatLabel>
                   </StatItem>
                   <StatItem>
-                    <StatValue>{user.holdJars}</StatValue>
+                    <StatValue>{user.jars_occupied}</StatValue>
                     <StatLabel>Hold Jars</StatLabel>
                   </StatItem>
                 </UserStats>
@@ -1349,11 +1368,11 @@ export default function UsersPage() {
                         {editMode ? (
                           <EditableField
                             type="number"
-                            value={editedUser?.walletBalance || 0}
-                            onChange={(e) => setEditedUser(prev => prev ? {...prev, walletBalance: Number(e.target.value)} : null)}
+                            value={editedUser?.wallet_balance || 0}
+                            onChange={(e) => setEditedUser(prev => prev ? {...prev, wallet_balance: Number(e.target.value)} : null)}
                           />
                         ) : (
-                          `₹${selectedUser.walletBalance || 0}`
+                          `₹${selectedUser.wallet_balance || 0}`
                         )}
                       </DetailValue>
                     </DetailItem>
@@ -1367,17 +1386,17 @@ export default function UsersPage() {
                         {editMode ? (
                           <EditableField
                             type="number"
-                            value={editedUser?.holdJars || 0}
-                            onChange={(e) => setEditedUser(prev => prev ? {...prev, holdJars: Number(e.target.value)} : null)}
+                            value={editedUser?.jars_occupied || 0}
+                            onChange={(e) => setEditedUser(prev => prev ? {...prev, jars_occupied: Number(e.target.value)} : null)}
                             style={{ background: '#fff3cd', border: '2px solid #ffc107' }}
                           />
                         ) : (
                           <span style={{ 
                             fontWeight: 'bold', 
-                            color: selectedUser.holdJars > 0 ? '#28a745' : '#6c757d',
+                            color: selectedUser.jars_occupied > 0 ? '#28a745' : '#6c757d',
                             fontSize: '1.1rem'
                           }}>
-                            {selectedUser.holdJars || 0} jars
+                            {selectedUser.jars_occupied || 0} jars
                           </span>
                         )}
                       </DetailValue>

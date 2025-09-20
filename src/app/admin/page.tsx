@@ -367,6 +367,67 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string>('');
 
+  // Function to manually initialize dashboard stats
+  const initializeDashboardStats = async () => {
+    setActionLoading(true);
+    try {
+      // Try to initialize the dashboard stats document via API
+      const response = await fetch('/api/init-dashboard-stats', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Dashboard stats document initialized successfully!');
+        alert('Dashboard stats initialized successfully!');
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error: any) {
+      console.error('❌ Error initializing dashboard stats:', error);
+      // Show error message
+      if (error.message.includes('permission-denied')) {
+        alert('Permission denied. Please make sure you are logged in as an admin user.');
+      } else {
+        alert(`Error initializing dashboard stats: ${error.message}`);
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Function to manually trigger dashboard stats update
+  const updateDashboardStats = async () => {
+    setActionLoading(true);
+    try {
+      // Call the API endpoint to update dashboard stats
+      const response = await fetch('/api/update-dashboard-stats', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Dashboard stats updated successfully!', result.stats);
+        alert('Dashboard stats updated successfully!');
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error: any) {
+      console.error('❌ Error updating dashboard stats:', error);
+      alert(`Error updating dashboard stats: ${error.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   useEffect(() => {
     setLoading(true);
     setError('');
@@ -419,13 +480,30 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
           
           // Keep using fallback calculation if document doesn't exist
           console.log('🔄 Using fallback calculation from orders/users collections...');
+          calculateStats(orders, users);
         }
       },
       (error) => {
         console.error('❌ Error subscribing to dashboard stats:', error);
         console.error('Error code:', error.code);
         console.error('Error message:', error.message);
-        setError(`Error connecting to Firebase dashboard_stats: ${error.message}`);
+        
+        // Handle permission denied error specifically
+        if (error.code === 'permission-denied') {
+          console.log('🔐 Permission denied for dashboard_stats collection - using fallback calculation');
+          // Continue with fallback calculation without showing error
+          setError('Permission denied for dashboard stats. Please ensure you are logged in as an admin and try initializing the dashboard stats document.');
+          calculateStats(orders, users);
+        } else if (error.code === 'not-found') {
+          console.log('📝 Dashboard stats document not found - using fallback calculation');
+          // Continue with fallback calculation without showing error
+          setError('Dashboard stats document not found. Please initialize the dashboard stats document.');
+          calculateStats(orders, users);
+        } else {
+          console.log('🔄 General error with dashboard_stats - using fallback calculation');
+          setError(`Error connecting to dashboard stats: ${error.message}`);
+          calculateStats(orders, users);
+        }
       }
     );
 
@@ -479,7 +557,7 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
           uniqueStatuses: [...new Set(ordersData.map(o => o.status))],
           pendingCount: ordersData.filter(o => o.status === 'pending').length,
           processingCount: ordersData.filter(o => o.status === 'processing').length,
-          deliveredCount: ordersData.filter(o => o.status === 'delivered').length,
+          deliveredCount: ordersData.filter(o => o.status === 'completed').length,
           completedCount: ordersData.filter(o => o.status === 'completed').length,
           cancelledCount: ordersData.filter(o => o.status === 'cancelled').length
         });
@@ -591,7 +669,7 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
     }).length;
 
     // Calculate Today&apos;s Revenue: (today total order quantity - today cancelled orders) * 37
-    const todayDeliveredOrders = todayOrders.filter(order => order.status === 'delivered');
+    const todayDeliveredOrders = todayOrders.filter(order => order.status === 'completed');
     const todayDeliveredQuantity = todayDeliveredOrders.reduce((sum, order) => {
       return sum + (order.quantity || order.items?.[0]?.quantity || 1);
     }, 0);
@@ -609,7 +687,7 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
     const totalUsers = usersData.length;
 
     // Calculate Total Revenue: (total delivered order quantity - total cancelled orders) * 37
-    const allDeliveredOrders = ordersData.filter(order => order.status === 'delivered');
+    const allDeliveredOrders = ordersData.filter(order => order.status === 'completed');
     const totalDeliveredQuantity = allDeliveredOrders.reduce((sum, order) => {
       return sum + (order.quantity || order.items?.[0]?.quantity || 1);
     }, 0);
@@ -728,36 +806,32 @@ Check console for detailed logs`);
             width={50}
             height={50}
           />
-          <Title>Dashboard Overview</Title>
+          <Title>Admin Dashboard</Title>
         </TitleSection>
         <ActionButtons>
-          <ActionButton
-            onClick={handleTriggerSubscriptions}
+          <ActionButton 
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={initializeDashboardStats}
             disabled={actionLoading}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
           >
-            <FiPlay />
-            Trigger Subscriptions
+            <FiRefreshCw /> {actionLoading ? 'Initializing...' : 'Init Dashboard Stats'}
           </ActionButton>
-          <ActionButton
-            onClick={handleGetAnalytics}
+          <ActionButton 
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={updateDashboardStats}
             disabled={actionLoading}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
           >
-            <FiTrendingUp />
-            Export Analytics
+            <FiRefreshCw /> {actionLoading ? 'Updating...' : 'Update Dashboard Stats'}
           </ActionButton>
-          <ActionButton
-            onClick={createDashboardStatsDocument}
+          <ActionButton 
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => triggerSubscriptionOrders()}
             disabled={actionLoading}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
           >
-            <FiInfo />
-            Create Dashboard Stats
+            <FiPlay /> Generate Subscription Orders
           </ActionButton>
         </ActionButtons>
       </Header>
@@ -767,12 +841,12 @@ Check console for detailed logs`);
         <div>
           <strong>📊 Live Dashboard - Real-Time KPI from Firebase dashboard_stats Collection:</strong>
           <br />• <strong>Data Source:</strong> Firebase collection 'dashboard_stats/live_metrics' document
-          <br />• <strong>Today&apos;s Revenue:</strong> Today&apos;s delivered orders quantity × ₹37 per jar
-          <br />• <strong>Processing Orders:</strong> Orders with pending or processing status (excludes cancelled/delivered)
+          <br />• <strong>Today&apos;s Revenue:</strong> Today&apos;s completed orders quantity × ₹37 per jar
+          <br />• <strong>Processing Orders:</strong> Orders with pending or processing status (excludes cancelled/completed)
           <br />• <strong>New Customers Today:</strong> Users who joined within the last 24 hours
           <br />• <strong>Total Orders:</strong> All orders (open + cancelled + delivered)
           <br />• <strong>Total Users:</strong> Total registered users in Firebase database
-          <br />• <strong>Total Revenue:</strong> All delivered orders quantity × ₹37 per jar
+          <br />• <strong>Total Revenue:</strong> All completed orders quantity × ₹37 per jar
           <br />🔄 <em>Data updates automatically from Firebase dashboard_stats collection in real-time</em>
         </div>
       </InfoBox>
@@ -895,7 +969,7 @@ Check console for detailed logs`);
               <StatLabel>Total Revenue</StatLabel>
               <StatTrend>
                 <FiDollarSign />
-                All delivered orders × ₹37
+                All completed orders × ₹37
               </StatTrend>
             </div>
             <StatIcon color="linear-gradient(135deg, #059669 0%, #047857 100%)">
@@ -907,10 +981,18 @@ Check console for detailed logs`);
 
       {error && (
         <InfoBox>
-          <FiInfo />
+          <FiInfo size={20} />
           <div>
-            <strong>Data Load Error:</strong> {error}
-            <br />Please check your Firebase configuration and try refreshing the page.
+            <strong>Dashboard Stats Error:</strong> {error}
+            <br />
+            <br />
+            To fix this issue:
+            <br />
+            1. Make sure you are logged in as an admin user
+            <br />
+            2. Click the "Init Dashboard Stats" button above to create the required document
+            <br />
+            3. If the problem persists, contact your system administrator
           </div>
         </InfoBox>
       )}

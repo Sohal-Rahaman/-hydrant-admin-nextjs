@@ -76,24 +76,65 @@ export const subscribeToCollection = (
 
 // Specific data fetchers
 export const getUserData = async (uid: string) => {
-  const userDoc = await getDoc(doc(db, 'users', uid));
-  return userDoc.exists() ? { id: userDoc.id, ...userDoc.data() } : null;
+  try {
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    return userDoc.exists() ? { id: userDoc.id, ...userDoc.data() } : null;
+  } catch (error) {
+    console.error('Error fetching user data:', error);
+    return null;
+  }
 };
 
-export const getAllOrders = () => {
-  return getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc')));
+export const getAllOrders = async () => {
+  try {
+    const querySnapshot = await getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc')));
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error('Error fetching orders:', error);
+    return [];
+  }
 };
 
-export const getAllUsers = () => {
-  return getDocs(collection(db, 'users'));
+export const getAllUsers = async () => {
+  try {
+    const querySnapshot = await getDocs(collection(db, 'users'));
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    return [];
+  }
 };
 
-export const getOrdersByStatus = (status: string) => {
-  return getDocs(query(collection(db, 'orders'), where('status', '==', status), orderBy('createdAt', 'desc')));
+export const getOrdersByStatus = async (status: string) => {
+  try {
+    const querySnapshot = await getDocs(query(collection(db, 'orders'), where('status', '==', status), orderBy('createdAt', 'desc')));
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error('Error fetching orders by status:', error);
+    return [];
+  }
 };
 
-export const getActiveSubscriptions = () => {
-  return getDocs(query(collection(db, 'subscriptions'), where('isActive', '==', true)));
+export const getActiveSubscriptions = async () => {
+  try {
+    const querySnapshot = await getDocs(query(collection(db, 'subscriptions'), where('isActive', '==', true)));
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error('Error fetching active subscriptions:', error);
+    return [];
+  }
 };
 
 interface OrderData {

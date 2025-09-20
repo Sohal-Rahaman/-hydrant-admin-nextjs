@@ -6,7 +6,7 @@ import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FiPackage, FiSearch, FiPhone, FiMapPin, FiClock,
-  FiNavigation, FiCheckCircle, FiRefreshCw, FiUser, FiInfo, FiX
+  FiNavigation, FiCheckCircle, FiRefreshCw, FiUser, FiInfo, FiX, FiDollarSign
 } from 'react-icons/fi';
 import { 
   subscribeToCollection, 
@@ -22,7 +22,7 @@ interface Order {
   userId: string;
   userName?: string;
   userPhone?: string;
-  status: 'pending' | 'processing' | 'delivered' | 'cancelled';
+  status: 'pending' | 'processing' | 'completed' | 'cancelled';
   quantity: number;
   amount: number;
   address: {
@@ -39,8 +39,8 @@ interface User {
   id: string;
   name: string;
   phoneNumber: string;
-  walletBalance: number;
-  holdJars: number;
+  wallet_balance: number;
+  jars_occupied: number;
   customerId?: string;
   userId?: string;
 }
@@ -122,7 +122,7 @@ const OrderStatus = styled.span<{ status: string }>`
     switch (props.status) {
       case 'pending': return 'background: #fef3c7; color: #92400e;';
       case 'processing': return 'background: #dbeafe; color: #1e40af;';
-      case 'delivered': return 'background: #d1fae5; color: #065f46;';
+      case 'completed': return 'background: #d1fae5; color: #065f46;';
       default: return 'background: #fee2e2; color: #991b1b;';
     }
   }}
@@ -292,115 +292,162 @@ export default function OrdersPage() {
         return;
       }
 
-      const ordersData = snapshot.docs.map((doc, index) => {
-        const data = doc.data();
-        console.log(`📋 Order ${index + 1}:`, {
-          id: doc.id,
-          rawData: data,
-          customerName: data.customerName,
-          customerPhone: data.customerPhone,
-          customerEmail: data.customerEmail,
-          customerId: data.customerId,
-          userId: data.userId,
-          deliveryAddress: data.deliveryAddress,
-          items: data.items,
-          status: data.status,
-          orderNumber: data.orderNumber,
-          total: data.total
-        });
-        
-        // Extract pincode from fullAddress string
-        const extractPincodeFromAddress = (address: string): string => {
-          if (!address) return 'UNKNOWN';
-          // Look for 6-digit pincode pattern in address
-          const pincodeMatch = address.match(/\b(\d{6})\b/);
-          return pincodeMatch ? pincodeMatch[1] : 'UNKNOWN';
-        };
-        
-        // More flexible data mapping to handle actual Firebase structure
-        const mappedOrder = {
-          id: doc.id,
-          userId: data.userId || data.customerId || '',
-          userName: data.customerName || data.userName || '',
-          userPhone: data.customerPhone || data.phoneNumber || '',
-          status: data.status || 'pending',
-          quantity: data.items?.[0]?.quantity || data.quantity || 1,
-          amount: data.total || data.amount || (data.items?.[0]?.quantity || 1) * 37,
-          address: {
-            street: data.deliveryAddress?.fullAddress || '',
-            city: '',
-            pincode: extractPincodeFromAddress(data.deliveryAddress?.fullAddress || ''),
-            full: data.deliveryAddress?.fullAddress || ''
-          },
-          createdAt: data.createdAt || data.orderDate || data.timestamp || new Date(),
-          orderType: data.orderType || 'regular'
-        };
-        
-        // Debug log for address mapping
-        console.log(`🏠 Address Debug for Order ${index + 1}:`, {
-          orderId: doc.id,
-          customerName: data.customerName,
-          rawDeliveryAddress: data.deliveryAddress,
-          fullAddressFromFirebase: data.deliveryAddress?.fullAddress,
-          mappedAddressFull: mappedOrder.address.full,
-          allPossibleAddressFields: {
-            'deliveryAddress.fullAddress': data.deliveryAddress?.fullAddress,
-            'deliveryAddress.address': data.deliveryAddress?.address,
-            'deliveryAddress.street': data.deliveryAddress?.street,
-            'address': data.address,
-            'fullAddress': data.fullAddress,
-            'userAddress': data.userAddress,
-            'shippingAddress': data.shippingAddress
+      try {
+        const ordersData = snapshot.docs.map((doc, index) => {
+          const data = doc.data();
+          console.log(`📋 Order ${index + 1}:`, {
+            id: doc.id,
+            rawData: data,
+            customerName: data.customerName,
+            customerPhone: data.customerPhone,
+            customerEmail: data.customerEmail,
+            customerId: data.customerId,
+            userId: data.userId,
+            deliveryAddress: data.deliveryAddress,
+            items: data.items,
+            status: data.status,
+            orderNumber: data.orderNumber,
+            total: data.total
+          });
+          
+          // Extract pincode from fullAddress string
+          const extractPincodeFromAddress = (address: string): string => {
+            if (!address) return 'UNKNOWN';
+            // Look for 6-digit pincode pattern in address
+            const pincodeMatch = address.match(/\b(\d{6})\b/);
+            return pincodeMatch ? pincodeMatch[1] : 'UNKNOWN';
+          };
+          
+          // More flexible data mapping to handle actual Firebase structure
+          const mappedOrder: Order = {
+            id: doc.id,
+            userId: data.userId || data.customerId || '',
+            userName: data.customerName || data.userName || '',
+            userPhone: data.customerPhone || data.phoneNumber || '',
+            status: data.status || 'pending',
+            quantity: data.items?.[0]?.quantity || data.quantity || 1,
+            amount: data.total || data.amount || (data.items?.[0]?.quantity || 1) * 37,
+            address: {
+              street: data.deliveryAddress?.fullAddress || '',
+              city: '',
+              pincode: extractPincodeFromAddress(data.deliveryAddress?.fullAddress || ''),
+              full: data.deliveryAddress?.fullAddress || ''
+            },
+            createdAt: data.createdAt || data.orderDate || data.timestamp || new Date(),
+            orderType: data.orderType || (data.subscriptionId ? 'subscription' : 'regular')
+          };
+          
+          // Normalize status values - handle any variations that might exist in the database
+          const statusMap: Record<string, Order['status']> = {
+            'pending': 'pending',
+            'processing': 'processing',
+            'completed': 'completed',
+            'cancelled': 'cancelled',
+            'delivered': 'completed', // Map delivered to completed as per previous fixes
+            'canceled': 'cancelled',  // Handle common typo
+          };
+          
+          if (mappedOrder.status in statusMap) {
+            mappedOrder.status = statusMap[mappedOrder.status];
+          } else if (!['pending', 'processing', 'completed', 'cancelled'].includes(mappedOrder.status)) {
+            console.warn('⚠️ Unexpected order status, defaulting to "pending":', {
+              orderId: doc.id,
+              status: mappedOrder.status,
+              rawData: data
+            });
+            mappedOrder.status = 'pending';
           }
-        });
-        
-        console.log(`✅ Mapped Order ${index + 1}:`, mappedOrder);
-        return mappedOrder;
-      }).filter((order: Order) => {
-        // Only filter out orders that are completely invalid (no ID)
-        const isValid = order.id;
-        if (!isValid) {
-          console.warn('⚠️ Filtering out invalid order (no ID):', order);
-        }
-        return isValid;
-      }).sort((a: Order, b: Order) => {
-        const getTimestamp = (date: Date | { toDate(): Date } | string): number => {
-          try {
-            if (typeof date === 'string') return new Date(date).getTime();
-            if (date instanceof Date) return date.getTime();
-            if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
-              return date.toDate().getTime();
+          
+          // Debug log for order status mapping
+          console.log(`📊 Order Status Debug for Order ${index + 1}:`, {
+            orderId: doc.id,
+            firebaseStatus: data.status,
+            mappedStatus: mappedOrder.status,
+            isCompleted: mappedOrder.status === 'completed',
+            isCancelled: mappedOrder.status === 'cancelled'
+          });
+          
+          // Debug log for subscription order detection
+          if (data.subscriptionId || data.orderType === 'subscription') {
+            console.log('🔄 Subscription Order Detected:', {
+              orderId: doc.id,
+              subscriptionId: data.subscriptionId,
+              orderType: data.orderType,
+              userId: mappedOrder.userId,
+              status: mappedOrder.status
+            });
+          }
+          
+          // Debug log for address mapping
+          console.log(`🏠 Address Debug for Order ${index + 1}:`, {
+            orderId: doc.id,
+            customerName: data.customerName,
+            rawDeliveryAddress: data.deliveryAddress,
+            fullAddressFromFirebase: data.deliveryAddress?.fullAddress,
+            mappedAddressFull: mappedOrder.address.full,
+            allPossibleAddressFields: {
+              'deliveryAddress.fullAddress': data.deliveryAddress?.fullAddress,
+              'deliveryAddress.address': data.deliveryAddress?.address,
+              'deliveryAddress.street': data.deliveryAddress?.street,
+              'address': data.address,
+              'fullAddress': data.fullAddress,
+              'userAddress': data.userAddress,
+              'shippingAddress': data.shippingAddress
             }
-            return new Date().getTime();
-          } catch {
-            return new Date().getTime();
+          });
+          
+          console.log(`✅ Mapped Order ${index + 1}:`, mappedOrder);
+          return mappedOrder;
+        }).filter((order) => {
+          // Only filter out orders that are completely invalid (no ID)
+          const isValid = order.id;
+          if (!isValid) {
+            console.warn('⚠️ Filtering out invalid order (no ID):', order);
           }
-        };
-        return getTimestamp(a.createdAt) - getTimestamp(b.createdAt);
-      });
-      
-      console.log('✅ Processed orders data:', {
-        totalOrders: ordersData.length,
-        orderStatuses: ordersData.map((o: Order) => o.status),
-        pincodes: ordersData.map((o: Order) => o.address.pincode),
-        uniquePincodes: [...new Set(ordersData.map((o: Order) => o.address.pincode))],
-        dumDumCount: ordersData.filter((o: Order) => o.address.pincode === '700030').length,
-        saltLakeCount: ordersData.filter((o: Order) => o.address.pincode === '700074').length,
-        subscriptionCount: ordersData.filter((o: Order) => o.orderType === 'subscription').length,
-        nonDeliveredCount: ordersData.filter((o: Order) => o.status !== 'delivered').length,
-        otherPincodesCount: ordersData.filter((o: Order) => 
-          o.address.pincode !== '700030' && 
-          o.address.pincode !== '700074' && 
-          o.orderType !== 'subscription'
-        ).length,
-        otherPincodes: [...new Set(ordersData
-          .filter((o: Order) => o.address.pincode !== '700030' && o.address.pincode !== '700074')
-          .map((o: Order) => o.address.pincode)
-        )]
-      });
-      
-      setOrders(ordersData);
-      setFilteredOrders(ordersData);
+          return isValid;
+        }).sort((a, b) => {
+          const getTimestamp = (date: Date | { toDate(): Date } | string): number => {
+            try {
+              if (typeof date === 'string') return new Date(date).getTime();
+              if (date instanceof Date) return date.getTime();
+              if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
+                return date.toDate().getTime();
+              }
+              return new Date().getTime();
+            } catch {
+              return new Date().getTime();
+            }
+          };
+          return getTimestamp(a.createdAt) - getTimestamp(b.createdAt);
+        });
+        
+        console.log('✅ Processed orders data:', {
+          totalOrders: ordersData.length,
+          orderStatuses: ordersData.map((o) => o.status),
+          pincodes: ordersData.map((o) => o.address.pincode),
+          uniquePincodes: [...new Set(ordersData.map((o) => o.address.pincode))],
+          dumDumCount: ordersData.filter((o) => o.address.pincode === '700030').length,
+          saltLakeCount: ordersData.filter((o) => o.address.pincode === '700074').length,
+          subscriptionCount: ordersData.filter((o) => o.orderType === 'subscription').length,
+          nonDeliveredCount: ordersData.filter((o) => o.status !== 'completed').length,
+          otherPincodesCount: ordersData.filter((o) => 
+            o.address.pincode !== '700030' && 
+            o.address.pincode !== '700074' && 
+            o.orderType !== 'subscription'
+          ).length,
+          otherPincodes: [...new Set(ordersData
+            .filter((o) => o.address.pincode !== '700030' && o.address.pincode !== '700074')
+            .map((o) => o.address.pincode)
+          )]
+        });
+        
+        setOrders(ordersData);
+        setFilteredOrders(ordersData);
+      } catch (error) {
+        console.error('❌ Error processing orders data:', error);
+        setOrders([]);
+        setFilteredOrders([]);
+      }
     }, [], (error) => {
       console.error('❌ Firebase orders subscription error:', error);
       alert(`Error connecting to Firebase orders: ${error.message}. Check console for details.`);
@@ -412,9 +459,23 @@ export default function OrdersPage() {
         isEmpty: snapshot.empty
       });
       
-      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as User[];
-      console.log('✅ Processed users data:', usersData.length, 'users');
-      setUsers(usersData);
+      try {
+        const usersData = snapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data(),
+          phoneNumber: doc.data().phoneNumber || doc.data().phone || '',
+          wallet_balance: doc.data().wallet_balance || doc.data().walletBalance || 0, // Use wallet_balance for user app compatibility
+          jars_occupied: doc.data().jars_occupied || doc.data().holdJars || doc.data().occupiedJars || 0 // Use jars_occupied for user app compatibility
+        })) as User[];
+        console.log('✅ Processed users data:', usersData.length, 'users');
+        setUsers(usersData);
+      } catch (error) {
+        console.error('❌ Error processing users data:', error);
+        setUsers([]);
+      }
+    }, [], (error) => {
+      console.error('❌ Firebase users subscription error:', error);
+      setUsers([]);
     });
 
     setTimeout(() => setLoading(false), 2000);
@@ -425,18 +486,44 @@ export default function OrdersPage() {
   useEffect(() => {
     let filtered = orders;
     
+    // Debug log for filtering
+    console.log('🔍 Filtering orders for tab:', activeTab, {
+      totalOrders: orders.length,
+      completedCount: orders.filter(o => o.status === 'completed').length,
+      cancelledCount: orders.filter(o => o.status === 'cancelled').length,
+      pendingCount: orders.filter(o => o.status === 'pending').length,
+      processingCount: orders.filter(o => o.status === 'processing').length
+    });
+    
     // Filter by tab first
     if (activeTab === 'open') {
       // Only show pending and processing orders (exclude delivered and cancelled)
       filtered = orders.filter(order => 
         order.status === 'pending' || order.status === 'processing'
       );
+      console.log('📦 Open orders filtered:', filtered.length);
     } else if (activeTab === 'completed') {
-      // Only show delivered orders
-      filtered = orders.filter(order => order.status === 'delivered');
+      // Only show completed orders
+      filtered = orders.filter(order => {
+        const isCompleted = order.status === 'completed';
+        console.log(`✅ Order ${order.id} status check:`, {
+          status: order.status,
+          isCompleted: isCompleted
+        });
+        return isCompleted;
+      });
+      console.log('✅ Completed orders filtered:', filtered.length);
     } else if (activeTab === 'cancelled') {
       // Only show cancelled orders
-      filtered = orders.filter(order => order.status === 'cancelled');
+      filtered = orders.filter(order => {
+        const isCancelled = order.status === 'cancelled';
+        console.log(`❌ Order ${order.id} status check:`, {
+          status: order.status,
+          isCancelled: isCancelled
+        });
+        return isCancelled;
+      });
+      console.log('❌ Cancelled orders filtered:', filtered.length);
     }
     
     // Then apply search filter if there's a search term
@@ -458,20 +545,39 @@ export default function OrdersPage() {
 
   // Filter orders based on active tab and organize by sections
   const getOrdersBySection = () => {
+    console.log('🧮 Getting orders by section for tab:', activeTab, {
+      filteredOrdersCount: filteredOrders.length,
+      completedCount: filteredOrders.filter(o => o.status === 'completed').length,
+      cancelledCount: filteredOrders.filter(o => o.status === 'cancelled').length
+    });
+    
     if (activeTab === 'open') {
       // For open orders: organize by pincode (only pending/processing)
-      const dumDumOrders = filteredOrders.filter(o => o.address.pincode === '700030');
-      const saltLakeOrders = filteredOrders.filter(o => o.address.pincode === '700074');
-      const subscriptionOrders = filteredOrders.filter(o => o.orderType === 'subscription');
+      const dumDumOrders = filteredOrders.filter(o => o.address.pincode === '700030' && (o.status === 'pending' || o.status === 'processing'));
+      const saltLakeOrders = filteredOrders.filter(o => o.address.pincode === '700074' && (o.status === 'pending' || o.status === 'processing'));
+      const subscriptionOrders = filteredOrders.filter(o => o.orderType === 'subscription' && (o.status === 'pending' || o.status === 'processing'));
       const otherOrders = filteredOrders.filter(o => 
         o.address.pincode !== '700030' && 
         o.address.pincode !== '700074' && 
-        o.orderType !== 'subscription'
+        o.orderType !== 'subscription' &&
+        (o.status === 'pending' || o.status === 'processing')
       );
+      
+      console.log('📂 Open orders sections:', {
+        dumDum: dumDumOrders.length,
+        saltLake: saltLakeOrders.length,
+        subscription: subscriptionOrders.length,
+        other: otherOrders.length
+      });
       
       return { dumDumOrders, saltLakeOrders, subscriptionOrders, otherOrders };
     } else {
       // For completed/cancelled: show all in single list
+      console.log('📂 Completed/Cancelled orders section:', {
+        allOrders: filteredOrders.length,
+        orders: filteredOrders.map(o => ({ id: o.id, status: o.status }))
+      });
+      
       return {
         allOrders: filteredOrders,
         dumDumOrders: [],
@@ -486,8 +592,16 @@ export default function OrdersPage() {
   
   // Get counts for tab badges
   const openOrdersCount = orders.filter(o => o.status === 'pending' || o.status === 'processing').length;
-  const completedOrdersCount = orders.filter(o => o.status === 'delivered').length;
+  const completedOrdersCount = orders.filter(o => o.status === 'completed').length;
   const cancelledOrdersCount = orders.filter(o => o.status === 'cancelled').length;
+  
+  // Debug log for order counts
+  console.log('🔢 Order counts:', {
+    open: openOrdersCount,
+    completed: completedOrdersCount,
+    cancelled: cancelledOrdersCount,
+    total: orders.length
+  });
 
   const handleCall = (phone: string) => phone && window.open(`tel:${phone}`, '_self');
   
@@ -623,6 +737,15 @@ Click OK to open Google Maps with this exact address.`);
       
       console.log('📋 Sample order documents:', sampleOrders);
       
+      // Analyze order statuses
+      const orderStatuses = snapshot.docs.map(doc => doc.data().status || 'pending');
+      const statusCounts: Record<string, number> = {};
+      orderStatuses.forEach(status => {
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+      });
+      
+      console.log('📊 Order status distribution:', statusCounts);
+      
       // Check for different possible field names
       const firstOrder = snapshot.docs[0]?.data();
       if (firstOrder) {
@@ -646,7 +769,12 @@ Click OK to open Google Maps with this exact address.`);
         });
       }
       
-      alert(`Firebase test: Found ${snapshot.docs.length} orders in database`);
+      // Show all unique statuses found in the database
+      const uniqueStatuses = [...new Set(orderStatuses)];
+      console.log('🏷️ Unique order statuses in database:', uniqueStatuses);
+      
+      alert(`Firebase test: Found ${snapshot.docs.length} orders in database
+Statuses: ${Object.entries(statusCounts).map(([status, count]) => `${status}(${count})`).join(', ')}`);
     } catch (error) {
       console.error('❌ Firebase connection test failed:', error);
       alert(`Firebase connection failed: ${error}`);
@@ -672,16 +800,19 @@ Click OK to open Google Maps with this exact address.`);
       let walletChange = 0;
       let holdJarsChange = 0;
 
-      if (delivery.jarReturned && delivery.paymentReceived) {
-        // Perfect delivery
-      } else if (!delivery.jarReturned) {
+      // Always deduct the order amount from wallet when order is completed
+      walletChange = -(selectedOrder.quantity * 37);
+      
+      // If jar is not returned, add to hold jars
+      if (!delivery.jarReturned) {
         holdJarsChange = selectedOrder.quantity;
-      } else if (!delivery.paymentReceived) {
-        walletChange = -(selectedOrder.quantity * 37);
       }
+      
+      // If payment is received, no additional changes needed
+      // If payment is not received, wallet balance will be negative (already deducted above)
 
       await updateDocument('orders', selectedOrder.id, {
-        status: 'delivered',
+        status: 'completed',
         deliveredAt: new Date(),
         deliveryNotes: delivery.notes,
         jarReturned: delivery.jarReturned,
@@ -690,8 +821,8 @@ Click OK to open Google Maps with this exact address.`);
 
       if ((walletChange !== 0 || holdJarsChange !== 0) && user) {
         const updates: any = { updatedAt: new Date() };
-        if (walletChange !== 0) updates.walletBalance = user.walletBalance + walletChange;
-        if (holdJarsChange !== 0) updates.holdJars = user.holdJars + holdJarsChange;
+        if (walletChange !== 0) updates.wallet_balance = user.wallet_balance + walletChange; // Use wallet_balance for user app compatibility
+        if (holdJarsChange !== 0) updates.jars_occupied = user.jars_occupied + holdJarsChange; // Use jars_occupied for user app compatibility
         await updateDocument('users', user.id, updates);
         console.log('User data updated successfully:', updates);
       } else if (walletChange !== 0 || holdJarsChange !== 0) {
@@ -708,6 +839,15 @@ Click OK to open Google Maps with this exact address.`);
   };
 
   const renderOrderCard = (order: Order) => {
+    // Debug log for order rendering
+    console.log('📄 Rendering order card:', {
+      orderId: order.id,
+      status: order.status,
+      type: order.orderType,
+      amount: order.amount,
+      tab: activeTab
+    });
+    
     const user = getUserDetails(order.userId);
     const name = order.userName || user?.name || 'Unknown Customer';
     const phone = order.userPhone || user?.phoneNumber || 'N/A';
@@ -768,7 +908,7 @@ Click OK to open Google Maps with this exact address.`);
             <FiNavigation size={14} />Get Route
           </ActionBtn>
           <ActionBtn variant="deliver" onClick={() => handleDeliveryClick(order)}>
-            <FiCheckCircle size={14} />Mark Delivered
+            <FiCheckCircle size={14} />Complete Order
           </ActionBtn>
         </OrderActions>
       </OrderCard>
@@ -806,6 +946,12 @@ Click OK to open Google Maps with this exact address.`);
           <ActionButton onClick={testFirebaseConnection}>
             <FiInfo />Test Firebase Connection
           </ActionButton>
+          <ActionButton onClick={() => window.location.reload()}>
+            <FiRefreshCw />Refresh Page
+          </ActionButton>
+          <ActionButton onClick={() => window.open('/admin/test-orders', '_blank')}>
+            <FiInfo />Debug Orders
+          </ActionButton>
         </div>
       </Header>
 
@@ -814,7 +960,7 @@ Click OK to open Google Maps with this exact address.`);
         <div>
           <strong>Smart Order Management:</strong> Orders organized by status and delivery areas, sorted by time (oldest first).
           <br />• <strong>Open Orders:</strong> {openOrdersCount} pending/processing orders across all areas
-          <br />• <strong>Completed Orders:</strong> {completedOrdersCount} successfully delivered orders
+          <br />• <strong>Completed Orders:</strong> {completedOrdersCount} successfully completed orders
           <br />• <strong>Cancelled Orders:</strong> {cancelledOrdersCount} cancelled orders
           {activeTab === 'open' && (
             <>
@@ -939,14 +1085,24 @@ Click OK to open Google Maps with this exact address.`);
           </div>
           <div style={{ maxHeight: '600px', overflowY: 'auto', padding: '10px' }}>
             {allOrders && allOrders.length > 0 ? (
-              allOrders.map(renderOrderCard)
+              <>
+                <div style={{ marginBottom: '10px', fontSize: '0.9rem', color: '#666' }}>
+                  Showing {allOrders.length} {activeTab} orders
+                </div>
+                {allOrders.map(renderOrderCard)}
+              </>
             ) : (
               <EmptyState>
                 {activeTab === 'completed' ? (
-                  <><FiCheckCircle size={24} /><div>No completed orders</div></>
+                  <><FiCheckCircle size={24} /><div>No completed orders found</div></>
                 ) : (
-                  <><FiX size={24} /><div>No cancelled orders</div></>
+                  <><FiX size={24} /><div>No cancelled orders found</div></>
                 )}
+                <div style={{ marginTop: '10px', fontSize: '0.9rem' }}>
+                  {activeTab === 'completed' 
+                    ? 'Completed orders will appear here after delivery confirmation' 
+                    : 'Cancelled orders will appear here when customers cancel their orders'}
+                </div>
               </EmptyState>
             )}
           </div>
@@ -959,7 +1115,7 @@ Click OK to open Google Maps with this exact address.`);
             <ModalContent initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}>
               <CloseBtn onClick={() => setShowModal(false)}><FiX /></CloseBtn>
               <ModalHeader>
-                <ModalTitle><FiCheckCircle />Mark Order as Delivered</ModalTitle>
+                <ModalTitle><FiCheckCircle />Mark Order as Completed</ModalTitle>
               </ModalHeader>
               <ModalBody>
                 <div style={{ marginBottom: '20px', padding: '15px', background: '#f9fafb', borderRadius: '8px' }}>
@@ -987,6 +1143,45 @@ Click OK to open Google Maps with this exact address.`);
                   <Label>Payment received from customer</Label>
                 </CheckboxGroup>
 
+                {/* Payment QR Code - shown when payment is not yet received */}
+                {!delivery.paymentReceived && (
+                  <div style={{ 
+                    marginTop: '20px', 
+                    padding: '15px', 
+                    background: '#f0f9ff', 
+                    borderRadius: '8px', 
+                    border: '1px solid #bae6fd',
+                    textAlign: 'center'
+                  }}>
+                    <h4 style={{ margin: '0 0 10px 0', color: '#0369a1' }}>
+                      <FiDollarSign style={{ marginRight: '8px' }} />
+                      Payment QR Code
+                    </h4>
+                    <p style={{ fontSize: '0.9rem', color: '#334155', marginBottom: '15px' }}>
+                      Scan this QR code to receive payment from customer
+                    </p>
+                    <Image 
+                      src="/paymentcode.png" 
+                      alt="Payment QR Code" 
+                      width={150} 
+                      height={150}
+                      style={{ 
+                        borderRadius: '8px', 
+                        border: '1px solid #cbd5e1',
+                        margin: '0 auto'
+                      }}
+                    />
+                    <p style={{ 
+                      fontSize: '0.8rem', 
+                      color: '#64748b', 
+                      marginTop: '10px',
+                      fontStyle: 'italic'
+                    }}>
+                      Amount: ₹{selectedOrder?.amount || 0}
+                    </p>
+                  </div>
+                )}
+
                 <div style={{ margin: '20px 0' }}>
                   <Label>Delivery Notes:</Label>
                   <TextArea 
@@ -1007,15 +1202,14 @@ Click OK to open Google Maps with this exact address.`);
                     !delivery.jarReturned ? '#92400e' : '#991b1b'
                 }}>
                   <strong>Result:</strong> {
-                    delivery.jarReturned && delivery.paymentReceived ? 'Perfect delivery - no changes needed' :
-                    !delivery.jarReturned ? `Add ${selectedOrder.quantity} jar(s) to hold jars` :
-                    `Deduct ₹${selectedOrder.quantity * 37} from wallet balance`
+                    `Deduct ₹${selectedOrder.quantity * 37} from wallet balance` +
+                    (!delivery.jarReturned ? ` and add ${selectedOrder.quantity} jar(s) to hold jars` : '')
                   }
                 </div>
 
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <ActionButton variant="primary" onClick={handleMarkDelivered} disabled={processing}>
-                    <FiCheckCircle />{processing ? 'Processing...' : 'Confirm Delivery'}
+                    <FiCheckCircle />{processing ? 'Processing...' : 'Confirm Completion'}
                   </ActionButton>
                   <ActionButton onClick={() => setShowModal(false)}>Cancel</ActionButton>
                 </div>

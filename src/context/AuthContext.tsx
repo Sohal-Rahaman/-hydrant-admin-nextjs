@@ -12,8 +12,8 @@ interface UserData {
   photoURL?: string;
   isAdmin?: boolean;
   customerId?: string;
-  walletBalance?: number;
-  occupiedJars?: number;
+  wallet_balance?: number;
+  jars_occupied?: number;
   coins?: number;
   createdAt?: Date | string;
   updatedAt?: Date | string;

@@ -308,6 +308,7 @@ export default function AnalyticsPage() {
         } else {
           console.log('⚠️ Dashboard stats document does not exist, using fallback calculation');
           // Fallback to calculation if document doesn't exist
+          processOrdersData(orders, users);
         }
       },
       (error) => {
@@ -315,31 +316,47 @@ export default function AnalyticsPage() {
       }
     );
 
-    // Subscribe to orders
+    // Subscribe to orders with error handling
     const unsubscribeOrders = subscribeToCollection('orders', (snapshot) => {
-      const ordersData = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt || new Date(),
-        status: doc.data().status || 'pending',
-        quantity: doc.data().items?.[0]?.quantity || doc.data().quantity || 1,
-        amount: doc.data().total || doc.data().amount || 37
-      })) as OrderData[];
-      
-      setOrders(ordersData);
-      processOrdersData(ordersData, users);
+      try {
+        const ordersData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: doc.data().createdAt || new Date(),
+          status: doc.data().status || 'pending',
+          quantity: doc.data().items?.[0]?.quantity || doc.data().quantity || 1,
+          amount: doc.data().total || doc.data().amount || 37
+        })) as OrderData[];
+        
+        setOrders(ordersData);
+        processOrdersData(ordersData, users);
+      } catch (error) {
+        console.error('❌ Error processing orders data:', error);
+        setOrders([]);
+      }
+    }, [], (error) => {
+      console.error('❌ Error subscribing to orders:', error);
+      setOrders([]);
     });
 
-    // Subscribe to users
+    // Subscribe to users with error handling
     const unsubscribeUsers = subscribeToCollection('users', (snapshot) => {
-      const usersData = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt || new Date()
-      })) as UserData[];
-      
-      setUsers(usersData);
-      processOrdersData(orders, usersData);
+      try {
+        const usersData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: doc.data().createdAt || new Date()
+        })) as UserData[];
+        
+        setUsers(usersData);
+        processOrdersData(orders, usersData);
+      } catch (error) {
+        console.error('❌ Error processing users data:', error);
+        setUsers([]);
+      }
+    }, [], (error) => {
+      console.error('❌ Error subscribing to users:', error);
+      setUsers([]);
     });
 
     setTimeout(() => setLoading(false), 2000);
@@ -371,7 +388,7 @@ export default function AnalyticsPage() {
     }).length;
 
     // Today&apos;s revenue
-    const todayDeliveredOrders = todayOrders.filter(order => order.status === 'delivered');
+    const todayDeliveredOrders = todayOrders.filter(order => order.status === 'completed');
     const todayDeliveredQuantity = todayDeliveredOrders.reduce((sum, order) => sum + order.quantity, 0);
     const todayRevenue = todayDeliveredQuantity * 37;
 
@@ -381,7 +398,7 @@ export default function AnalyticsPage() {
     ).length;
 
     // Total revenue
-    const allDeliveredOrders = ordersData.filter(order => order.status === 'delivered');
+    const allDeliveredOrders = ordersData.filter(order => order.status === 'completed');
     const totalDeliveredQuantity = allDeliveredOrders.reduce((sum, order) => sum + order.quantity, 0);
     const totalRevenue = totalDeliveredQuantity * 37;
 
@@ -408,7 +425,7 @@ export default function AnalyticsPage() {
         return orderDate >= date && orderDate < nextDate;
       });
 
-      const dayDelivered = dayOrders.filter(order => order.status === 'delivered');
+      const dayDelivered = dayOrders.filter(order => order.status === 'completed');
       const dayQuantity = dayOrders.reduce((sum, order) => sum + order.quantity, 0);
       const dayRevenue = dayDelivered.reduce((sum, order) => sum + order.quantity, 0) * 37;
 
@@ -486,12 +503,12 @@ export default function AnalyticsPage() {
         <div>
           <strong>📊 Live Analytics - Real-Time KPI Data from Firebase:</strong>
           <br />• <strong>Data Source:</strong> Firebase collection &apos;dashboard_stats/live_metrics&apos;
-          <br />• <strong>Today&apos;s Revenue:</strong> Today&apos;s delivered orders quantity × ₹37 per jar
-          <br />• <strong>Processing Orders:</strong> Orders with pending or processing status (excludes cancelled/delivered)
+          <br />• <strong>Today&apos;s Revenue:</strong> Today&apos;s completed orders quantity × ₹37 per jar
+          <br />• <strong>Processing Orders:</strong> Orders with pending or processing status (excludes cancelled/completed)
           <br />• <strong>New Customers Today:</strong> Users who joined within the last 24 hours
           <br />• <strong>Total Orders:</strong> All orders (open + cancelled + delivered)
           <br />• <strong>Total Users:</strong> Total registered users in Firebase database
-          <br />• <strong>Total Revenue:</strong> All delivered orders quantity × ₹37 per jar
+          <br />• <strong>Total Revenue:</strong> All completed orders quantity × ₹37 per jar
           <br />🔄 <em>Charts and KPIs update automatically from Firebase dashboard_stats collection in real-time</em>
         </div>
       </InfoBox>
