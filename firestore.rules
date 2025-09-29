@@ -7,10 +7,18 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
     
-    // Allow users to read and write their own user data
+    // Allow users to read and write their own user data, admins have full access
     match /users/{userId} {
-      allow read, write: if request.auth != null && 
-        (request.auth.uid == userId || isAdmin());
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow write, update, delete: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      // Added a separate read rule for admins to ensure they can read all users
+      allow list: if request.auth != null && isAdmin();
+    }
+    
+    // Account deletion requests collection - admins have full access
+    match /account_deletion_requests/{requestId} {
+      allow read, write: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow read, write, update, delete, list: if request.auth != null && isAdmin();
     }
     
     // Allow users to read and write their own orders, but admins can read all

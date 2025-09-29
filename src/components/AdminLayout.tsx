@@ -13,7 +13,8 @@ import {
   FiUsers, 
   FiBarChart, 
   FiLogOut,
-  FiMapPin
+  FiMapPin,
+  FiUserX
 } from 'react-icons/fi';
 import { useAuth } from '@/context/AuthContext';
 
@@ -295,6 +296,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { path: '/admin', label: 'Dashboard', icon: FiHome },
     { path: '/admin/orders', label: 'Orders', icon: FiPackage },
     { path: '/admin/users', label: 'Users', icon: FiUsers },
+    { path: '/admin/deletion-requests', label: 'Deletion Requests', icon: FiUserX },
     { path: '/admin/delivery', label: 'Delivery Map', icon: FiMapPin },
     { path: '/admin/analytics', label: 'Analytics', icon: FiBarChart },
   ];

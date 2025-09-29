@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, QuerySnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { deleteUser as firebaseDeleteUser } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -28,6 +29,17 @@ export const googleProvider = new GoogleAuthProvider();
 export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
 export const signInWithEmail = (email: string, password: string) => signInWithEmailAndPassword(auth, email, password);
 export const logOut = () => signOut(auth);
+export const deleteUser = async (userId: string) => {
+  try {
+    // This is an admin operation that requires a Cloud Function
+    const deleteUserFunction = httpsCallable(functions, 'deleteUserAccount');
+    await deleteUserFunction({ userId });
+    return true;
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    throw error;
+  }
+};
 
 // Cloud Functions
 export const markOrderAsCompleted = httpsCallable(functions, 'markOrderAsCompleted');
