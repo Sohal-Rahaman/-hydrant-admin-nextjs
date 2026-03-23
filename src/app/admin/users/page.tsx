@@ -2,21 +2,24 @@
 
 import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
-import styled from 'styled-components';
+import styled, { css } from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
+import {
   FiUsers, FiSearch, FiPhone, FiMail, FiMapPin, FiCalendar,
   FiDollarSign, FiPackage, FiX, FiEdit3, FiSave, FiRefreshCw,
   FiNavigation, FiTrendingUp, FiCheckCircle, FiXCircle,
-  FiStar, FiInfo
+  FiStar, FiClock, FiActivity, FiArrowRight, FiInfo
 } from 'react-icons/fi';
-import { 
-  subscribeToCollection, 
+import {
+  subscribeToCollection,
   updateDocument,
   addDocument,
   deleteDocument,
-  generateCustomerId
+  generateCustomerId,
+  getDocument
 } from '@/lib/firebase';
+import { useAuth } from '@/context/AuthContext';
+import { logActivity } from '@/lib/activityLogger';
 
 // Interface definitions
 interface Address {
@@ -47,13 +50,49 @@ interface User {
   totalCoins: number;
   totalShares: number;
   wallet_balance: number;
-  jars_occupied: number; // Number of jars user currently holds
+  jars_occupied: number;
   totalRevenue: number;
   totalCans: number;
   orders: Order[];
   addresses: Address[];
   subscription?: Subscription;
+  referralCoins?: number;
+  depositMoney?: number;
+  role?: string;
+  firstOrderDate?: Date | null;
+  lastOrderDate?: Date | null;
+  totalCompletedOrders?: number;
+  totalCancelledOrders?: number;
 }
+
+// --- Helper Functions ---
+const formatDate = (date: Date | { toDate(): Date } | string | number | undefined, includeTime = false) => {
+  if (!date) return 'N/A';
+  let d: Date;
+
+  if (typeof date === 'string' || typeof date === 'number') {
+    d = new Date(date);
+  } else if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
+    d = date.toDate();
+  } else if (date instanceof Date) {
+    d = date;
+  } else {
+    return 'N/A';
+  }
+
+  if (isNaN(d.getTime())) return 'N/A';
+
+  const options: Intl.DateTimeFormatOptions = {
+    day: 'numeric', month: 'short', year: 'numeric',
+    ...(includeTime && { hour: '2-digit', minute: '2-digit' })
+  };
+  return d.toLocaleDateString('en-IN', options);
+};
+
+const openMap = (address: Address) => {
+  const query = address.addressLine || `${address.street}, ${address.city}, ${address.pincode}`;
+  window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`, '_blank');
+};
 
 interface Order {
   id: string;
@@ -68,10 +107,15 @@ interface Subscription {
   userId: string;
   isActive: boolean;
   plan: string;
+  planType?: string;
+  totalMonthlyJars?: number;
+  jarsDeliveredThisCycle?: number;
+  carryForwardJars?: number;
   startDate: Date | { toDate(): Date } | string;
   endDate?: Date | { toDate(): Date } | string;
   nextDelivery?: Date | { toDate(): Date } | string;
   frequency?: string; // weekly, monthly, etc.
+  deliveryDays?: string[];
   deliverySlot?: string;
   planPrice?: number;
   totalDeliveries?: number;
@@ -95,6 +139,33 @@ const Header = styled.div`
   margin-bottom: 30px;
   flex-wrap: wrap;
   gap: 20px;
+`;
+
+const SortSelect = styled.select`
+  padding: 12px 16px;
+  border: 2px solid #e5e7eb;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  background: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
+
+  &:focus {
+    outline: none;
+    border-color: #8e2de2;
+    box-shadow: 0 0 0 3px rgba(142, 45, 226, 0.1);
+  }
+`;
+
+const SortContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+`;
+
+const SortLabel = styled.span`
+  font-weight: 600;
+  color: #333;
 `;
 
 const TitleSection = styled.div`
@@ -124,6 +195,7 @@ const SearchBox = styled.div`
   position: relative;
   display: flex;
   align-items: center;
+
 `;
 
 const SearchInput = styled.input`
@@ -148,11 +220,17 @@ const SearchIcon = styled(FiSearch)`
   font-size: 1.1rem;
 `;
 
-const UsersGrid = styled.div`
+const Container = styled.div`
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+`;
+
+const UserGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 25px;
-  margin-bottom: 40px;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
 `;
 
 const UserCard = styled(motion.div)`
@@ -299,6 +377,17 @@ const EmptyState = styled.div`
   color: #666;
 `;
 
+const UserDetailGrid = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  margin-bottom: 30px;
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
 const InfoBox = styled.div`
   background: #e0f2fe;
   border: 1px solid #0891b2;
@@ -313,13 +402,6 @@ const InfoBox = styled.div`
   line-height: 1.5;
 `;
 
-const AddressCard = styled.div`
-  background: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
-  padding: 15px;
-  margin-bottom: 10px;
-`;
 
 const AddressType = styled.div`
   background: #8e2de2;
@@ -404,16 +486,7 @@ const ModalBody = styled.div`
   padding: 0 30px 30px 30px;
 `;
 
-const UserDetailGrid = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 30px;
-  margin-bottom: 30px;
 
-  @media (max-width: 768px) {
-    grid-template-columns: 1fr;
-  }
-`;
 
 const DetailSection = styled.div`
   background: #f9fafb;
@@ -481,7 +554,7 @@ const ButtonGroup = styled.div`
   margin-top: 20px;
 `;
 
-const ActionButton = styled(motion.button)<{ variant?: 'primary' | 'secondary' | 'danger' }>`
+const ActionButton = styled(motion.button) <{ variant?: 'primary' | 'secondary' | 'danger' }>`
   padding: 8px 12px;
   border-radius: 6px;
   border: none;
@@ -512,14 +585,307 @@ const ActionButton = styled(motion.button)<{ variant?: 'primary' | 'secondary' |
   }}
 `;
 
+// New styled components for the enhanced UI
+const ModalSubtitle = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 0.9rem;
+  
+  > div {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+`;
+
+const DeepStatsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+`;
+
+const DeepStatCard = styled.div<{ color: string }>`
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+  }
+  
+  .icon {
+    font-size: 2rem;
+    color: ${props => props.color};
+    margin-bottom: 0.5rem;
+  }
+  
+  h5 {
+    margin: 0.5rem 0 0.25rem 0;
+    color: #334155;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  
+  .value {
+    font-size: 1.875rem;
+    font-weight: 700;
+    color: ${props => props.color};
+    margin: 0.25rem 0;
+  }
+  
+  .sub {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin: 0;
+  }
+`;
+
+const InfoGrid = styled.div`
+  display: flex;
+  gap: 2rem;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+  }
+`;
+
+const ActionRow = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e2e8f0;
+  margin-top: 1.5rem;
+`;
+
+const Button = styled.button<{ variant?: 'primary' | 'secondary' | 'danger' }>`
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  
+  ${props => {
+    switch (props.variant) {
+      case 'primary':
+        return `
+          background: linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%);
+          color: white;
+          &:hover { background: linear-gradient(135deg, #7e1dd2 0%, #3a00d0 100%); }
+        `;
+      case 'secondary':
+        return `
+          background: white;
+          color: #374151;
+          border: 1px solid #d1d5db;
+          &:hover { background: #f3f4f6; }
+        `;
+      case 'danger':
+        return `
+          background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+          color: white;
+          &:hover { background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%); }
+        `;
+      default:
+        return `
+          background: white;
+          color: #374151;
+          border: 1px solid #d1d5db;
+          &:hover { background: #f3f4f6; }
+        `;
+    }
+  }}
+`;
+
+// Additional missing styled components
+const TitleGroup = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 15px;
+`;
+
+const Logo = styled(Image)`
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+`;
+
+const PageTitle = styled.h1`
+  color: #333;
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  
+  span {
+    color: #8e2de2;
+  }
+`;
+
+const Controls = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+`;
+
+const SearchWrapper = styled.div`
+  position: relative;
+  display: flex;
+  align-items: center;
+`;
+
+const SelectInput = styled.select`
+  padding: 10px 14px;
+  border: 2px solid #e5e7eb;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  background: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:focus {
+    outline: none;
+    border-color: #8e2de2;
+    box-shadow: 0 0 0 3px rgba(142, 45, 226, 0.1);
+  }
+`;
+
+// Card components for the new UI
+const Card = styled(motion.div)`
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  overflow: hidden;
+  
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+    border-color: #8e2de2;
+  }
+`;
+
+const CardHeader = styled.div`
+  padding: 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+`;
+
+const UserIdentity = styled.div`
+  h3 {
+    margin: 0 0 0.25rem 0;
+    color: #1e293b;
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+  
+  p {
+    margin: 0.25rem 0;
+    color: #64748b;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+`;
+
+const StatusBadge = styled.div<{ $active: boolean }>`
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  ${props => props.$active
+    ? `background: #d1fae5; color: #065f46;`
+    : `background: #fee2e2; color: #991b1b;`
+  }
+`;
+
+const KeyStatsRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  gap: 1rem;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+`;
+
+const StatPill = styled.div<{ color: string }>`
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.75rem;
+  text-align: center;
+  flex: 1;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  }
+  
+  .label {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.25rem;
+  }
+  
+  .value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: ${props => props.color};
+  }
+`;
+
+const CardFooter = styled.div`
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+`;
+
+// --- Main Component ---
+
 export default function UsersPage() {
+  const { currentUser, userData } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortOption, setSortOption] = useState('newest'); // Add sort option state
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [selectedReferralStats, setSelectedReferralStats] = useState({ pending: 0, completed: 0 });
   const [editMode, setEditMode] = useState(false);
   const [editedUser, setEditedUser] = useState<User | null>(null);
   const [editedSubscription, setEditedSubscription] = useState<Subscription | null>(null);
@@ -527,24 +893,7 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Helper function to format dates consistently
-  const formatDate = (date: Date | { toDate(): Date } | string | undefined): string => {
-    if (!date) return 'N/A';
-    try {
-      if (typeof date === 'string') {
-        return new Date(date).toLocaleDateString();
-      }
-      if (date instanceof Date) {
-        return date.toLocaleDateString();
-      }
-      if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
-        return date.toDate().toLocaleDateString();
-      }
-      return 'Invalid Date';
-    } catch {
-      return 'Invalid Date';
-    }
-  };
+  // formatDate is now defined at the top of the file for global use in this component
 
   useEffect(() => {
     setLoading(true);
@@ -556,7 +905,7 @@ export default function UsersPage() {
         const usersData = snapshot.docs.map((doc) => {
           const data = doc.data();
           console.log('User document:', doc.id, data);
-          
+
           // Check if user has legacy address structure
           let legacyAddresses: Address[] = [];
           if (data.address) {
@@ -575,7 +924,7 @@ export default function UsersPage() {
             }];
             console.log('Found legacy address for user:', doc.id, legacyAddresses);
           }
-          
+
           return {
             id: doc.id,
             customerId: data.customerId || generateCustomerId(),
@@ -592,7 +941,8 @@ export default function UsersPage() {
             addresses: legacyAddresses, // Store legacy addresses temporarily
             totalRevenue: 0, // Will be calculated later
             totalCans: 0, // Will be calculated later
-            orders: [] // Will be populated later
+            orders: [], // Will be populated later
+
           };
         });
         console.log('Processed users:', usersData);
@@ -613,7 +963,7 @@ export default function UsersPage() {
         const addressesData = snapshot.docs.map((doc) => {
           const data = doc.data();
           console.log('Address document:', doc.id, data);
-          
+
           // Handle the actual Firebase structure with address_line
           const address = {
             id: doc.id,
@@ -630,7 +980,7 @@ export default function UsersPage() {
             isDefault: data.isDefault || false,
             createdAt: data.createdAt || new Date()
           };
-          
+
           console.log('Processed address:', address);
           return address;
         });
@@ -677,25 +1027,30 @@ export default function UsersPage() {
         const subscriptionsData = snapshot.docs.map((doc) => {
           const data = doc.data();
           console.log('Subscription document:', doc.id, data);
-          
+
           const subscription: Subscription = {
             id: doc.id,
             userId: data.userId || data.user_id || data.uid || '', // Support multiple field names
             isActive: Boolean(data.isActive), // Ensure boolean conversion
-            plan: data.plan || data.planName || 'Basic',
-            startDate: data.startDate || data.createdAt || new Date(),
+            plan: data.plan || (data.quantity ? `${data.quantity} Jars` : 'Basic'),
+            planType: data.planType || 'interval',
+            totalMonthlyJars: data.totalMonthlyJars,
+            jarsDeliveredThisCycle: data.jarsDeliveredThisCycle,
+            carryForwardJars: data.carryForwardJars,
+            startDate: data.createdAt || data.startDate || new Date(),
             endDate: data.endDate,
             nextDelivery: data.nextDelivery || data.nextDeliveryDate,
             frequency: data.frequency || data.deliveryFrequency || 'weekly',
+            deliveryDays: data.deliveryDays || [],
             deliverySlot: data.deliverySlot || data.timeSlot,
-            planPrice: data.planPrice || data.price || 0,
+            planPrice: data.pricePerDelivery || data.monthlyPrice || 0,
             totalDeliveries: data.totalDeliveries || 0,
             remainingDeliveries: data.remainingDeliveries || 0,
             pausedUntil: data.pausedUntil,
             createdAt: data.createdAt || new Date(),
             updatedAt: data.updatedAt
           };
-          
+
           console.log(`Subscription ${doc.id} for user ${data.userId || data.user_id || data.uid}:`, {
             rawIsActive: data.isActive,
             processedIsActive: subscription.isActive,
@@ -743,33 +1098,46 @@ export default function UsersPage() {
     console.log('Combining users with addresses...');
     console.log('Users count:', users.length);
     console.log('Addresses count:', addresses.length);
-    
+
     const usersWithAddresses = users.map(user => {
       // First check for addresses from the addresses collection
       const userAddresses = addresses.filter(addr => {
         console.log(`Checking address ${addr.id} for user ${user.id}: addr.userId=${addr.userId}`);
         return addr.userId === user.id;
       });
-      
+
       // If no addresses found in collection, use legacy addresses from user document
       let finalAddresses = userAddresses;
       if (userAddresses.length === 0 && user.addresses && user.addresses.length > 0) {
         console.log(`Using legacy addresses for user ${user.id}:`, user.addresses);
         finalAddresses = user.addresses;
       }
-      
+
       console.log(`User ${user.id} (${user.firstName}) has ${finalAddresses.length} addresses:`, finalAddresses);
-      
+
       const userOrders = orders.filter(order => order.userId === user.id);
       const completedOrders = userOrders.filter(order => order.status === 'completed');
+      const cancelledOrders = userOrders.filter(order => order.status === 'cancelled');
+
+      // Calculate order dates
+      const orderDates = userOrders.map(order => {
+        if (order.createdAt instanceof Date) return order.createdAt;
+        if (typeof order.createdAt === 'object' && 'toDate' in order.createdAt) return order.createdAt.toDate();
+        if (typeof order.createdAt === 'string') return new Date(order.createdAt);
+        return new Date(0); // fallback to epoch if invalid
+      }).filter(date => !isNaN(date.getTime())); // filter out invalid dates
+
+      const firstOrderDate = orderDates.length > 0 ? new Date(Math.min(...orderDates.map(date => date.getTime()))) : null;
+      const lastOrderDate = orderDates.length > 0 ? new Date(Math.max(...orderDates.map(date => date.getTime()))) : null;
+
       const userSubscription = subscriptions.find(sub => {
         console.log(`Comparing subscription userId ${sub.userId} with user id ${user.id}, customerId ${user.customerId}, email ${user.email}`);
         // Try multiple matching strategies
-        return sub.userId === user.id || 
-               sub.userId === user.customerId || 
-               sub.userId === user.email;
+        return sub.userId === user.id ||
+          sub.userId === user.customerId ||
+          sub.userId === user.email;
       });
-      
+
       console.log(`User ${user.id} (${user.name}):`, {
         hasSubscription: !!userSubscription,
         subscriptionId: userSubscription?.id,
@@ -786,10 +1154,38 @@ export default function UsersPage() {
         orders: userOrders,
         totalRevenue: completedOrders.length * 37,
         totalCans: completedOrders.length,
-        subscription: userSubscription || undefined
+        // Additional calculated fields
+        firstOrderDate,
+        lastOrderDate,
+        totalCompletedOrders: completedOrders.length,
+        totalCancelledOrders: cancelledOrders.length,
+        subscription: userSubscription || undefined,
+        referralCoins: user.totalCoins || 0,
+        depositMoney: user.wallet_balance || 0,
       };
     });
-    
+
+    // Helper function to convert various date formats to Date object
+    const parseDate = (date: Date | { toDate(): Date } | string | undefined): Date => {
+      if (!date) return new Date(0);
+      if (date instanceof Date) return date;
+      if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
+        return date.toDate();
+      }
+      if (typeof date === 'string') {
+        const parsed = new Date(date);
+        return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+      }
+      return new Date(0);
+    };
+
+    // Apply default sorting (newest) on initial combination
+    usersWithAddresses.sort((a, b) => {
+      const dateA = parseDate(a.createdAt);
+      const dateB = parseDate(b.createdAt);
+      return dateB.getTime() - dateA.getTime();
+    });
+
     console.log('Final users with addresses:', usersWithAddresses);
     setFilteredUsers(usersWithAddresses);
   }, [users, addresses, orders, subscriptions]);
@@ -800,39 +1196,124 @@ export default function UsersPage() {
       return;
     } else {
       const filtered = filteredUsers.filter(user => {
-        const basicSearch = 
+        const basicSearch =
           user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           user.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           user.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           user.phoneNumber?.includes(searchTerm) ||
           user.customerId?.toLowerCase().includes(searchTerm.toLowerCase());
-        
-        const addressSearch = user.addresses.some(addr => 
+
+        const addressSearch = user.addresses.some(addr =>
           addr.addressLine?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           addr.street?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           addr.city?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           addr.pincode?.includes(searchTerm) ||
           addr.type?.toLowerCase().includes(searchTerm.toLowerCase())
         );
-        
+
         return basicSearch || addressSearch;
       });
       setFilteredUsers(filtered);
     }
   }, [searchTerm, filteredUsers]);
 
+  // Add sorting effect
+  useEffect(() => {
+    let sortedUsers = [...filteredUsers];
+
+    // Helper function to convert various date formats to Date object
+    const parseDate = (date: Date | { toDate(): Date } | string | undefined): Date => {
+      if (!date) return new Date(0);
+      if (date instanceof Date) return date;
+      if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
+        return date.toDate();
+      }
+      if (typeof date === 'string') {
+        const parsed = new Date(date);
+        return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+      }
+      return new Date(0);
+    };
+
+    switch (sortOption) {
+      case 'customerId':
+        sortedUsers.sort((a, b) => a.customerId.localeCompare(b.customerId));
+        break;
+      case 'name':
+        sortedUsers.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        break;
+      case 'newest':
+        sortedUsers.sort((a, b) => {
+          const dateA = parseDate(a.createdAt);
+          const dateB = parseDate(b.createdAt);
+          return dateB.getTime() - dateA.getTime();
+        });
+        break;
+      case 'oldest':
+        sortedUsers.sort((a, b) => {
+          const dateA = parseDate(a.createdAt);
+          const dateB = parseDate(b.createdAt);
+          return dateA.getTime() - dateB.getTime();
+        });
+        break;
+      case 'orders':
+        sortedUsers.sort((a, b) => b.orders.length - a.orders.length);
+        break;
+      case 'revenue':
+        sortedUsers.sort((a, b) => b.totalRevenue - a.totalRevenue);
+        break;
+      default:
+        break;
+    }
+
+    setFilteredUsers(sortedUsers);
+  }, [sortOption]);
+
   const handleUserClick = (user: User) => {
     setSelectedUser(user);
-    setEditedUser(user);
+    // Ensure all fields are properly initialized in editedUser
+    setEditedUser({
+      ...user,
+      referralCoins: user.referralCoins ?? user.totalCoins,
+      depositMoney: user.depositMoney ?? user.wallet_balance,
+    });
     setEditMode(false);
     setSubscriptionEditMode(false);
     setEditedSubscription(user.subscription || null);
   };
 
+  useEffect(() => {
+    const fetchReferralStats = async () => {
+      if (!selectedUser?.customerId) return;
+      try {
+        const { collection, getDocs, query, where } = await import('firebase/firestore');
+        const { db } = await import('@/lib/firebase');
+        const q = query(
+          collection(db, 'users'),
+          where('referredBy', '==', selectedUser.customerId)
+        );
+        const snapshot = await getDocs(q);
+        let pending = 0;
+        let completed = 0;
+        snapshot.forEach(doc => {
+          if (doc.data().isReferralRewarded) {
+            completed++;
+          } else {
+            pending++;
+          }
+        });
+        setSelectedReferralStats({ completed, pending });
+      } catch (error) {
+        console.error('Error fetching referral stats:', error);
+      }
+    };
+    fetchReferralStats();
+  }, [selectedUser?.customerId]);
+
   const handleSave = async () => {
     if (!editedUser) return;
-    
+
     setSaving(true);
     try {
       const updateData = {
@@ -844,13 +1325,51 @@ export default function UsersPage() {
         totalShares: editedUser.totalShares,
         wallet_balance: editedUser.wallet_balance, // Use wallet_balance for user app compatibility
         jars_occupied: editedUser.jars_occupied, // Use jars_occupied for user app compatibility
+        referralCoins: editedUser.referralCoins,
+        depositMoney: editedUser.depositMoney,
+        role: editedUser.role,
         updatedAt: new Date()
       };
-      
+
       await updateDocument('users', editedUser.id, updateData);
+
+      if (selectedUser) {
+        if (editedUser.wallet_balance !== selectedUser.wallet_balance) {
+          const change = editedUser.wallet_balance - selectedUser.wallet_balance;
+          await logActivity({
+            action: 'WALLET_UPDATED',
+            actor: 'ADMIN',
+            actorId: currentUser?.uid || 'unknown',
+            actorName: currentUser?.email || 'Admin',
+            targetId: editedUser.id,
+            details: `Admin ${change > 0 ? 'added' : 'deducted'} ₹${Math.abs(change)} ${change > 0 ? 'to' : 'from'} wallet. New balance: ₹${editedUser.wallet_balance}`
+          });
+        }
+        if (editedUser.jars_occupied !== selectedUser.jars_occupied) {
+          await logActivity({
+            action: 'JAR_UPDATED',
+            actor: 'ADMIN',
+            actorId: currentUser?.uid || 'unknown',
+            actorName: currentUser?.email || 'Admin',
+            targetId: editedUser.id,
+            details: `Admin updated hold jars from ${selectedUser.jars_occupied} to ${editedUser.jars_occupied}`
+          });
+        }
+        if (editedUser.role !== selectedUser.role) {
+          await logActivity({
+            action: 'ROLE_UPDATED',
+            actor: 'ADMIN',
+            actorId: currentUser?.uid || 'unknown',
+            actorName: currentUser?.email || 'Admin',
+            targetId: editedUser.id,
+            details: `Admin changed role from ${selectedUser.role || 'user'} to ${editedUser.role || 'user'}`
+          });
+        }
+      }
+
       setSelectedUser(editedUser);
       setEditMode(false);
-      
+
       // Show success message with real-time update info
       const message = selectedUser && (editedUser.jars_occupied !== selectedUser.jars_occupied || editedUser.wallet_balance !== selectedUser.wallet_balance)
         ? 'User details updated successfully! Hold Jars and Wallet Balance changes will reflect in the user app immediately.'
@@ -866,16 +1385,26 @@ export default function UsersPage() {
 
   const handleDelete = async () => {
     if (!selectedUser) return;
-    
+
     const confirmDelete = window.confirm(
       `Are you sure you want to delete user ${selectedUser.name || `${selectedUser.firstName} ${selectedUser.lastName}`}? This action cannot be undone.`
     );
-    
+
     if (!confirmDelete) return;
-    
+
     setSaving(true);
     try {
       await deleteDocument('users', selectedUser.id);
+      
+      await logActivity({
+        action: 'USER_DELETED',
+        actor: 'ADMIN',
+        actorId: currentUser?.uid || 'unknown',
+        actorName: currentUser?.email || 'Admin',
+        targetId: selectedUser.id,
+        details: `Admin deleted user ${selectedUser.name || `${selectedUser.firstName} ${selectedUser.lastName}`.trim()}`
+      });
+
       setSelectedUser(null);
       alert('User deleted successfully!');
     } catch (error) {
@@ -901,7 +1430,7 @@ export default function UsersPage() {
   // Subscription Management Functions
   const handleSubscriptionSave = async () => {
     if (!editedSubscription || !selectedUser) return;
-    
+
     setSaving(true);
     try {
       if (editedSubscription.id) {
@@ -936,7 +1465,7 @@ export default function UsersPage() {
         };
         await addDocument('subscriptions', newSubscription);
       }
-      
+
       setSubscriptionEditMode(false);
       alert('Subscription updated successfully!');
     } catch (error) {
@@ -949,10 +1478,10 @@ export default function UsersPage() {
 
   const handleSubscriptionPause = async () => {
     if (!selectedUser?.subscription) return;
-    
+
     const pauseUntil = prompt('Pause subscription until (YYYY-MM-DD):');
     if (!pauseUntil) return;
-    
+
     setSaving(true);
     try {
       await updateDocument('subscriptions', selectedUser.subscription.id, {
@@ -971,13 +1500,13 @@ export default function UsersPage() {
 
   const handleSubscriptionDelete = async () => {
     if (!selectedUser?.subscription) return;
-    
+
     const confirmDelete = window.confirm(
       `Are you sure you want to delete the subscription for ${selectedUser.name}? This action cannot be undone.`
     );
-    
+
     if (!confirmDelete) return;
-    
+
     setSaving(true);
     try {
       await deleteDocument('subscriptions', selectedUser.subscription.id);
@@ -999,55 +1528,64 @@ export default function UsersPage() {
   }
 
   return (
-    <UsersContainer>
+    <Container>
       <Header>
-        <TitleSection>
-          <UsersLogo 
-            src="/logo.jpeg" 
+        <TitleGroup>
+          <Logo
+            src="/logo.jpeg"
             alt="Hydrant Logo"
-            width={45}
-            height={45}
+            width={48}
+            height={48}
           />
-          <Title>
-            <FiUsers />
-            Users Management
-          </Title>
-        </TitleSection>
-        <SearchBox>
-          <SearchIcon />
-          <SearchInput
-            type="text"
-            placeholder="Search by name, email, phone, customer ID, or address..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </SearchBox>
+          <PageTitle>
+            User <span>Management</span>
+          </PageTitle>
+        </TitleGroup>
+        <Controls>
+          <SearchWrapper>
+            <SearchInput
+              type="text"
+              placeholder="Search by name, email, phone, customer ID, or address..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            <FiSearch style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+          </SearchWrapper>
+          <SelectInput value={sortOption} onChange={(e) => setSortOption(e.target.value)}>
+            <option value="newest">Newest Users</option>
+            <option value="oldest">Oldest Users</option>
+            <option value="customerId">Customer ID</option>
+            <option value="name">Name</option>
+            <option value="orders">Most Orders</option>
+            <option value="revenue">Highest Revenue</option>
+          </SelectInput>
+        </Controls>
       </Header>
 
       {/* Debug Panel - Remove in production */}
-      <div style={{ 
-        background: '#f8f9fa', 
+      <div style={{
+        background: '#f8f9fa',
         border: '1px solid #dee2e6',
-        padding: '12px', 
-        borderRadius: '8px', 
+        padding: '12px',
+        borderRadius: '8px',
         marginBottom: '20px',
         fontSize: '13px',
         fontFamily: 'monospace',
         color: '#495057'
       }}>
-        <strong>🔍 Debug Info:</strong><br/>
-        Users loaded: {users.length} | 
-        Addresses loaded: {addresses.length} | 
-        Subscriptions loaded: {subscriptions.length} | 
-        Combined users: {filteredUsers.length} | 
-        Users with addresses: {filteredUsers.filter(u => u.addresses && u.addresses.length > 0).length} | 
-        Active subscriptions: {filteredUsers.filter(u => u.subscription?.isActive).length}<br/>
+        <strong>🔍 Debug Info:</strong><br />
+        Users loaded: {users.length} |
+        Addresses loaded: {addresses.length} |
+        Subscriptions loaded: {subscriptions.length} |
+        Combined users: {filteredUsers.length} |
+        Users with addresses: {filteredUsers.filter(u => u.addresses && u.addresses.length > 0).length} |
+        Active subscriptions: {filteredUsers.filter(u => u.subscription?.isActive).length}<br />
         <details style={{ marginTop: '8px' }}>
           <summary style={{ cursor: 'pointer', color: '#007bff' }}>View address details</summary>
           <div style={{ marginTop: '8px', maxHeight: '200px', overflow: 'auto' }}>
             {addresses.slice(0, 5).map(addr => (
               <div key={addr.id} style={{ margin: '4px 0', padding: '4px', background: '#fff', borderRadius: '4px' }}>
-                <strong>ID:</strong> {addr.id} | <strong>UserID:</strong> {addr.userId} | <strong>Type:</strong> {addr.type}<br/>
+                <strong>ID:</strong> {addr.id} | <strong>UserID:</strong> {addr.userId} | <strong>Type:</strong> {addr.type}<br />
                 <strong>Address:</strong> {addr.addressLine || `${addr.street}, ${addr.city}`} | <strong>Default:</strong> {addr.isDefault ? 'Yes' : 'No'}
               </div>
             ))}
@@ -1058,15 +1596,15 @@ export default function UsersPage() {
           <summary style={{ cursor: 'pointer', color: '#28a745' }}>View subscription details</summary>
           <div style={{ marginTop: '8px', maxHeight: '200px', overflow: 'auto' }}>
             {subscriptions.slice(0, 5).map(sub => (
-              <div key={sub.id} style={{ 
-                margin: '4px 0', 
-                padding: '4px', 
-                background: sub.isActive ? '#d4edda' : '#f8d7da', 
+              <div key={sub.id} style={{
+                margin: '4px 0',
+                padding: '4px',
+                background: sub.isActive ? '#d4edda' : '#f8d7da',
                 borderRadius: '4px',
                 border: `1px solid ${sub.isActive ? '#28a745' : '#dc3545'}`
               }}>
-                <strong>ID:</strong> {sub.id} | <strong>UserID:</strong> {sub.userId} | 
-                <strong style={{ color: sub.isActive ? '#28a745' : '#dc3545' }}>Active:</strong> {sub.isActive ? 'YES' : 'NO'}<br/>
+                <strong>ID:</strong> {sub.id} | <strong>UserID:</strong> {sub.userId} |
+                <strong style={{ color: sub.isActive ? '#28a745' : '#dc3545' }}>Active:</strong> {sub.isActive ? 'YES' : 'NO'}<br />
                 <strong>Plan:</strong> {sub.plan} | <strong>Frequency:</strong> {sub.frequency}
               </div>
             ))}
@@ -1087,91 +1625,76 @@ export default function UsersPage() {
         </div>
       </InfoBox>
 
-      <UsersGrid>
+      <UserGrid>
         {filteredUsers.length > 0 ? (
           filteredUsers.map((user, index) => {
             const defaultAddress = user.addresses.find(addr => addr.isDefault) || user.addresses[0];
             return (
-              <UserCard
+              <Card
                 key={user.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
                 onClick={() => handleUserClick(user)}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-                  <div style={{ flex: 1 }}>
-                    <UserName>
-                      {user.name || `${user.firstName} ${user.lastName}`.trim()}
-                    </UserName>
-                    <UserEmail>
-                      <FiMail size={14} />
-                      {user.email}
-                    </UserEmail>
-                    <UserPhone>
-                      <FiPhone size={14} />
-                      {user.phoneNumber}
-                    </UserPhone>
-                    <CustomerId>
-                      ID: {user.customerId}
-                    </CustomerId>
-                    {defaultAddress && (
-                      <AddressPreview>
-                        <FiMapPin size={14} />
+                <CardHeader>
+                  <UserIdentity>
+                    <h3>{user.name || `${user.firstName} ${user.lastName}`.trim()}</h3>
+                    <p><FiMail size={14} /> {user.email}</p>
+                    <p><FiPhone size={14} /> {user.phoneNumber}</p>
+                    <p style={{ color: '#6366f1', fontWeight: '600' }}>ID: {user.customerId}</p>
+                  </UserIdentity>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                    <StatusBadge $active={user.subscription?.isActive === true}>
+                      {user.subscription?.isActive === true ? 'Active' : 'Inactive'}
+                    </StatusBadge>
+                  </div>
+
+                </CardHeader>
+
+                <KeyStatsRow>
+                  <StatPill color="#8e2de2">
+                    <span className="label">Wallet</span>
+                    <span className="value">₹{user.wallet_balance || 0}</span>
+                  </StatPill>
+                  <StatPill color="#10b981">
+                    <span className="label">Hold Jars</span>
+                    <span className="value">{user.jars_occupied || 0}</span>
+                  </StatPill>
+                  <StatPill color="#3b82f6">
+                    <span className="label">Orders</span>
+                    <span className="value">{user.orders.length}</span>
+                  </StatPill>
+                  <StatPill color="#f59e0b">
+                    <span className="label">Revenue</span>
+                    <span className="value">₹{user.totalRevenue}</span>
+                  </StatPill>
+                </KeyStatsRow>
+
+                {defaultAddress && (
+                  <CardFooter>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <FiMapPin size={14} style={{ color: '#64748b' }} />
+                      <span style={{ fontSize: '0.875rem', color: '#64748b' }}>
                         {defaultAddress.type}: {defaultAddress.addressLine || `${defaultAddress.city}, ${defaultAddress.pincode}`}
                         {defaultAddress.isDefault && (
                           <span style={{
-                            background: '#28a745',
-                            color: 'white',
+                            background: '#e0e7ff',
+                            color: '#4f46e5',
                             fontSize: '0.7rem',
-                            padding: '1px 4px',
-                            borderRadius: '3px',
+                            padding: '2px 6px',
+                            borderRadius: '9999px',
                             fontWeight: '600',
-                            marginLeft: '6px'
+                            marginLeft: '0.5rem'
                           }}>
                             DEFAULT
                           </span>
                         )}
-                      </AddressPreview>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <SubscriptionBadge active={(() => {
-                      const isActive = user.subscription?.isActive === true;
-                      console.log(`User ${user.id} subscription badge:`, {
-                        subscription: user.subscription,
-                        isActiveRaw: user.subscription?.isActive,
-                        isActiveProcessed: isActive,
-                        type: typeof user.subscription?.isActive
-                      });
-                      return isActive;
-                    })()}>
-                      {user.subscription?.isActive === true ? 'Active' : 'Inactive'}
-                    </SubscriptionBadge>
-                    <small style={{ fontSize: '0.6rem', color: '#666' }}>
-                      (Raw: {String(user.subscription?.isActive)}, Type: {typeof user.subscription?.isActive})
-                    </small>
-                  </div>
-                </div>
-                
-                <UserStats>
-                  <StatItem>
-                    <StatValue>{user.orders.length}</StatValue>
-                    <StatLabel>Orders</StatLabel>
-                  </StatItem>
-                  <StatItem>
-                    <StatValue>₹{user.totalRevenue}</StatValue>
-                    <StatLabel>Revenue</StatLabel>
-                  </StatItem>
-                  <StatItem>
-                    <StatValue>{user.addresses.length}</StatValue>
-                    <StatLabel>Addresses</StatLabel>
-                  </StatItem>
-                  <StatItem>
-                    <StatValue>{user.jars_occupied}</StatValue>
-                    <StatLabel>Hold Jars</StatLabel>
-                  </StatItem>
-                </UserStats>
+                      </span>
+                    </div>
+                    <FiArrowRight size={16} style={{ color: '#94a3b8' }} />
+                  </CardFooter>
+                )}
 
                 {user.addresses.length > 0 && (
                   <div style={{ marginTop: '20px' }}>
@@ -1179,26 +1702,29 @@ export default function UsersPage() {
                       Saved Addresses ({user.addresses.length})
                     </h4>
                     {user.addresses.slice(0, 2).map((address) => (
-                      <AddressCard key={address.id}>
+                      <div key={address.id} style={{ background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: '8px', padding: '15px', marginBottom: '10px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                          <AddressType>{address.type}</AddressType>
+                          <div style={{ background: '#8e2de2', color: 'white', padding: '4px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '600', textTransform: 'uppercase', display: 'inline-block', marginBottom: '8px' }}>
+                            {address.type}
+                          </div>
                           {address.isDefault && (
                             <span style={{
                               background: '#28a745',
                               color: 'white',
-                              fontSize: '0.75rem',
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              fontWeight: '600'
+                              fontSize: '0.7rem',
+                              padding: '1px 4px',
+                              borderRadius: '3px',
+                              fontWeight: '600',
+                              marginLeft: '6px'
                             }}>
                               DEFAULT
                             </span>
                           )}
                         </div>
-                        <AddressText>
+                        <div style={{ color: '#495057', fontSize: '0.9rem', lineHeight: '1.4' }}>
                           {address.addressLine || `${address.street}, ${address.city}, ${address.state} - ${address.pincode}`}
-                        </AddressText>
-                      </AddressCard>
+                        </div>
+                      </div>
                     ))}
                     {user.addresses.length > 2 && (
                       <div style={{ color: '#666', fontSize: '0.85rem', fontStyle: 'italic' }}>
@@ -1208,10 +1734,10 @@ export default function UsersPage() {
                   </div>
                 )}
 
-                <ClickHint>
+                <div style={{ color: '#8e2de2', fontSize: '0.8rem', textAlign: 'center', marginTop: '15px', opacity: '0.7', transition: 'all 0.3s ease' }}>
                   👆 Click to view details &amp; manage user
-                </ClickHint>
-              </UserCard>
+                </div>
+              </Card>
             );
           })
         ) : (
@@ -1221,7 +1747,7 @@ export default function UsersPage() {
             <p>No users match your search criteria</p>
           </EmptyState>
         )}
-      </UsersGrid>
+      </UserGrid>
 
       {/* User Detail Modal */}
       <AnimatePresence>
@@ -1241,453 +1767,676 @@ export default function UsersPage() {
               <CloseButton onClick={() => setSelectedUser(null)}>
                 <FiX />
               </CloseButton>
-              
+
               <ModalHeader>
                 <ModalTitle>
-                  <FiUsers />
                   {selectedUser.name || `${selectedUser.firstName} ${selectedUser.lastName}`.trim()}
                 </ModalTitle>
+                <ModalSubtitle>
+                  <div><FiMail /> {selectedUser.email}</div>
+                  <div><FiPhone /> {selectedUser.phoneNumber}</div>
+                  <div><FiUsers /> {selectedUser.customerId}</div>
+                </ModalSubtitle>
               </ModalHeader>
 
               <ModalBody>
+                <DeepStatsGrid>
+                  <DeepStatCard color="#8e2de2">
+                    <FiDollarSign className="icon" />
+                    <h5>Total Revenue</h5>
+                    <div className="value">₹{selectedUser.totalRevenue}</div>
+                    <div className="sub">Total earnings from completed orders</div>
+                  </DeepStatCard>
+
+                  <DeepStatCard color="#10b981">
+                    <FiPackage className="icon" />
+                    <h5>Hold Jars</h5>
+                    <div className="value">{selectedUser.jars_occupied || 0}</div>
+                    <div className="sub">Currently held by user</div>
+                  </DeepStatCard>
+
+                  <DeepStatCard color="#3b82f6">
+                    <FiActivity className="icon" />
+                    <h5>Total Orders</h5>
+                    <div className="value">{selectedUser.orders.length}</div>
+                    <div className="sub">All orders placed</div>
+                  </DeepStatCard>
+
+                  <DeepStatCard color="#f59e0b">
+                    <FiClock className="icon" />
+                    <h5>Wallet Balance</h5>
+                    <div className="value">₹{selectedUser.wallet_balance || 0}</div>
+                    <div className="sub">Available for orders</div>
+                  </DeepStatCard>
+                </DeepStatsGrid>
+
                 <UserDetailGrid>
-                  <DetailSection>
-                    <SectionTitle>
-                      <FiUsers />
-                      Personal Information
-                    </SectionTitle>
-                    
-                    <DetailItem>
-                      <DetailLabel>Customer ID</DetailLabel>
-                      <DetailValue>
-                        {editMode ? (
-                          <EditableField
-                            value={editedUser?.customerId || ''}
-                            onChange={(e) => setEditedUser(prev => prev ? {...prev, customerId: e.target.value} : null)}
-                          />
-                        ) : (
-                          <span style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#8e2de2' }}>
+                  <InfoGrid>
+                    <div style={{ flex: 2 }}>
+                      <SectionTitle>
+                        <FiUsers /> Personal Information
+                      </SectionTitle>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+                        <div>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Customer ID</div>
+                          <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b', fontFamily: 'monospace' }}>
                             {selectedUser.customerId}
-                          </span>
-                        )}
-                      </DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>
-                        <FiUsers />
-                        Full Name
-                      </DetailLabel>
-                      <DetailValue>
-                        {editMode ? (
-                          <EditableField
-                            value={editedUser?.name || `${editedUser?.firstName || ''} ${editedUser?.lastName || ''}`.trim()}
-                            onChange={(e) => setEditedUser(prev => prev ? {...prev, name: e.target.value} : null)}
-                          />
-                        ) : (
-                          selectedUser.name || `${selectedUser.firstName || ''} ${selectedUser.lastName || ''}`.trim()
-                        )}
-                      </DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>
-                        <FiPhone />
-                        Phone
-                      </DetailLabel>
-                      <DetailValue>
-                        {editMode ? (
-                          <EditableField
-                            value={editedUser?.phoneNumber || ''}
-                            onChange={(e) => setEditedUser(prev => prev ? {...prev, phoneNumber: e.target.value} : null)}
-                          />
-                        ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            {selectedUser.phoneNumber}
-                            <ActionButton
-                              variant="secondary"
-                              onClick={() => handleCall(selectedUser.phoneNumber)}
-                              style={{ padding: '4px 8px' }}
-                            >
-                              <FiPhone size={12} />
-                              Call
-                            </ActionButton>
                           </div>
-                        )}
-                      </DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>
-                        <FiMail />
-                        Email
-                      </DetailLabel>
-                      <DetailValue>
-                        {editMode ? (
-                          <EditableField
-                            value={editedUser?.email || ''}
-                            onChange={(e) => setEditedUser(prev => prev ? {...prev, email: e.target.value} : null)}
-                          />
-                        ) : (
-                          selectedUser.email
-                        )}
-                      </DetailValue>
-                    </DetailItem>
-                  </DetailSection>
+                        </div>
 
-                  <DetailSection>
-                    <SectionTitle>
-                      <FiStar />
-                      Wallet & Business
-                    </SectionTitle>
-                    
-                    <DetailItem>
-                      <DetailLabel>
-                        <FiStar />
-                        Total Coins
-                      </DetailLabel>
-                      <DetailValue>
-                        {editMode ? (
-                          <EditableField
-                            type="number"
-                            value={editedUser?.totalCoins || 0}
-                            onChange={(e) => setEditedUser(prev => prev ? {...prev, totalCoins: Number(e.target.value)} : null)}
-                          />
-                        ) : (
-                          selectedUser.totalCoins || 0
-                        )}
-                      </DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>
-                        <FiDollarSign />
-                        Wallet Balance
-                      </DetailLabel>
-                      <DetailValue>
-                        {editMode ? (
-                          <EditableField
-                            type="number"
-                            value={editedUser?.wallet_balance || 0}
-                            onChange={(e) => setEditedUser(prev => prev ? {...prev, wallet_balance: Number(e.target.value)} : null)}
-                          />
-                        ) : (
-                          `₹${selectedUser.wallet_balance || 0}`
-                        )}
-                      </DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>
-                        <FiPackage />
-                        Hold Jars
-                      </DetailLabel>
-                      <DetailValue>
-                        {editMode ? (
-                          <EditableField
-                            type="number"
-                            value={editedUser?.jars_occupied || 0}
-                            onChange={(e) => setEditedUser(prev => prev ? {...prev, jars_occupied: Number(e.target.value)} : null)}
-                            style={{ background: '#fff3cd', border: '2px solid #ffc107' }}
-                          />
-                        ) : (
-                          <span style={{ 
-                            fontWeight: 'bold', 
-                            color: selectedUser.jars_occupied > 0 ? '#28a745' : '#6c757d',
-                            fontSize: '1.1rem'
-                          }}>
-                            {selectedUser.jars_occupied || 0} jars
-                          </span>
-                        )}
-                      </DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>
-                        <FiTrendingUp />
-                        Total Revenue
-                      </DetailLabel>
-                      <DetailValue>₹{selectedUser.totalRevenue}</DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>
-                        <FiPackage />
-                        Total Orders
-                      </DetailLabel>
-                      <DetailValue>{selectedUser.orders.length}</DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>
-                        {selectedUser.subscription?.isActive ? <FiCheckCircle /> : <FiXCircle />}
-                        Subscription Status
-                      </DetailLabel>
-                      <DetailValue>
-                        <SubscriptionBadge active={(() => {
-                          const isActive = selectedUser.subscription?.isActive === true;
-                          console.log(`Modal subscription badge for ${selectedUser.id}:`, {
-                            subscription: selectedUser.subscription,
-                            isActiveRaw: selectedUser.subscription?.isActive,
-                            isActiveProcessed: isActive,
-                            type: typeof selectedUser.subscription?.isActive
-                          });
-                          return isActive;
-                        })()}>
-                          {selectedUser.subscription?.isActive === true ? 'Active' : 'Inactive'}
-                        </SubscriptionBadge>
-                      </DetailValue>
-                    </DetailItem>
-                  </DetailSection>
+                        <div>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Join Date</div>
+                          <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                            {formatDate(selectedUser.createdAt)}
+                          </div>
+                        </div>
+                      </div>
 
-                  {/* Subscription Details Section */}
-                  {(selectedUser.subscription || subscriptionEditMode) && (
-                    <DetailSection>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <SectionTitle>
-                          <FiCheckCircle />
-                          Subscription Management
-                        </SectionTitle>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          {!subscriptionEditMode && selectedUser.subscription && (
-                            <>
-                              <ActionButton
-                                variant="primary"
-                                onClick={() => setSubscriptionEditMode(true)}
-                                style={{ padding: '4px 8px', fontSize: '0.8rem' }}
-                              >
-                                <FiEdit3 size={12} />
-                                Edit
-                              </ActionButton>
-                              <ActionButton
-                                variant="secondary"
-                                onClick={handleSubscriptionPause}
-                                style={{ padding: '4px 8px', fontSize: '0.8rem' }}
-                              >
-                                <FiXCircle size={12} />
-                                Pause
-                              </ActionButton>
-                              <ActionButton
-                                variant="danger"
-                                onClick={handleSubscriptionDelete}
-                                style={{ padding: '4px 8px', fontSize: '0.8rem' }}
-                              >
-                                <FiX size={12} />
-                                Delete
-                              </ActionButton>
-                            </>
+                      <div style={{ marginBottom: '1.5rem' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Full Name</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                          {editMode ? (
+                            <EditableField
+                              value={editedUser?.name || ''}
+                              onChange={(e) => setEditedUser({ ...editedUser!, name: e.target.value })}
+                            />
+                          ) : (
+                            selectedUser.name || `${selectedUser.firstName || ''} ${selectedUser.lastName || ''}`.trim()
                           )}
                         </div>
                       </div>
-                      
-                      {selectedUser.subscription ? (
-                        <>
-                          <DetailItem>
-                            <DetailLabel>
-                              <FiPackage />
-                              Plan
-                            </DetailLabel>
-                            <DetailValue>
-                              <span style={{ fontWeight: 'bold', color: '#8e2de2' }}>
-                                {selectedUser.subscription.plan}
-                              </span>
-                            </DetailValue>
-                          </DetailItem>
-                          
-                          {selectedUser.subscription.frequency && (
-                            <DetailItem>
-                              <DetailLabel>
-                                <FiRefreshCw />
-                                Frequency
-                              </DetailLabel>
-                              <DetailValue>
-                                {selectedUser.subscription.frequency.charAt(0).toUpperCase() + selectedUser.subscription.frequency.slice(1)}
-                              </DetailValue>
-                            </DetailItem>
-                          )}
-                          
-                          {selectedUser.subscription.planPrice && (
-                            <DetailItem>
-                              <DetailLabel>
-                                <FiDollarSign />
-                                Plan Price
-                              </DetailLabel>
-                              <DetailValue>₹{selectedUser.subscription.planPrice}</DetailValue>
-                            </DetailItem>
-                          )}
-                          
-                          <DetailItem>
-                            <DetailLabel>
-                              <FiCalendar />
-                              Start Date
-                            </DetailLabel>
-                            <DetailValue>
-                              {formatDate(selectedUser.subscription.startDate)}
-                            </DetailValue>
-                          </DetailItem>
-                          
-                          {selectedUser.subscription.nextDelivery && (
-                            <DetailItem>
-                              <DetailLabel>
-                                <FiTrendingUp />
-                                Next Delivery
-                              </DetailLabel>
-                              <DetailValue>
-                                <span style={{ color: '#28a745', fontWeight: 'bold' }}>
-                                  {formatDate(selectedUser.subscription.nextDelivery)}
-                                </span>
-                              </DetailValue>
-                            </DetailItem>
-                          )}
-                          
-                          {selectedUser.subscription.deliverySlot && (
-                            <DetailItem>
-                              <DetailLabel>
-                                <FiMapPin />
-                                Delivery Slot
-                              </DetailLabel>
-                              <DetailValue>{selectedUser.subscription.deliverySlot}</DetailValue>
-                            </DetailItem>
-                          )}
-                          
-                          {selectedUser.subscription.totalDeliveries && (
-                            <DetailItem>
-                              <DetailLabel>
-                                <FiPackage />
-                                Total Deliveries
-                              </DetailLabel>
-                              <DetailValue>{selectedUser.subscription.totalDeliveries}</DetailValue>
-                            </DetailItem>
-                          )}
-                          
-                          {selectedUser.subscription.remainingDeliveries !== undefined && (
-                            <DetailItem>
-                              <DetailLabel>
-                                <FiTrendingUp />
-                                Remaining Deliveries
-                              </DetailLabel>
-                              <DetailValue>
-                                <span style={{ color: selectedUser.subscription.remainingDeliveries > 0 ? '#28a745' : '#dc3545' }}>
-                                  {selectedUser.subscription.remainingDeliveries}
-                                </span>
-                              </DetailValue>
-                            </DetailItem>
-                          )}
-                          
-                          {selectedUser.subscription.pausedUntil && (
-                            <DetailItem>
-                              <DetailLabel>
-                                <FiXCircle />
-                                Paused Until
-                              </DetailLabel>
-                              <DetailValue>
-                                <span style={{ color: '#ffc107', fontWeight: 'bold' }}>
-                                  {formatDate(selectedUser.subscription.pausedUntil)}
-                                </span>
-                              </DetailValue>
-                            </DetailItem>
-                          )}
-                        </>
-                      ) : (
-                        <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>
-                          <p>No subscription found. Click Edit to create a new subscription.</p>
-                        </div>
-                      )}
-                    </DetailSection>
-                  )}
-                </UserDetailGrid>
 
-                {/* Note: Subscription management with edit/pause/delete functionality is available */}
-                {/* Addresses Section */}
-                {selectedUser.addresses.length > 0 && (
-                  <DetailSection style={{ marginTop: '20px' }}>
-                    <SectionTitle>
-                      <FiMapPin />
-                      Saved Addresses ({selectedUser.addresses.length})
-                    </SectionTitle>
-                    
-                    {selectedUser.addresses.map((address) => (
-                      <AddressCard key={address.id}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                          <AddressType>{address.type}</AddressType>
-                          {address.isDefault && (
-                            <span style={{
-                              background: '#28a745',
-                              color: 'white',
-                              fontSize: '0.75rem',
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              fontWeight: '600'
-                            }}>
-                              DEFAULT
-                            </span>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+                        <div>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Phone</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {editMode ? (
+                              <EditableField
+                                value={editedUser?.phoneNumber || ''}
+                                onChange={(e) => setEditedUser({ ...editedUser!, phoneNumber: e.target.value })}
+                              />
+                            ) : (
+                              <>
+                                <span style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>{selectedUser.phoneNumber}</span>
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => handleCall(selectedUser.phoneNumber)}
+                                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                                >
+                                  <FiPhone size={12} /> Call
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Email</div>
+                          <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                            {editMode ? (
+                              <EditableField
+                                value={editedUser?.email || ''}
+                                onChange={(e) => setEditedUser({ ...editedUser!, email: e.target.value })}
+                              />
+                            ) : (
+                              selectedUser.email
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+                        <div>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Role</div>
+                          <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                            {editMode && userData?.role === 'superadmin' ? (
+                              <SelectInput
+                                value={editedUser?.role || 'user'}
+                                onChange={(e) => setEditedUser({ ...editedUser!, role: e.target.value })}
+                                style={{ width: '100%', padding: '8px', fontSize: '1rem' }}
+                              >
+                                <option value="user">User</option>
+                                <option value="support">Support</option>
+                                <option value="manager">Manager</option>
+                                <option value="admin">Admin</option>
+                                <option value="superadmin">Super Admin</option>
+                              </SelectInput>
+                            ) : (
+                              <span style={{ textTransform: 'capitalize' }}>{selectedUser.role || 'User'}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ flex: 3 }}>
+                      <SectionTitle>
+                        <FiStar /> Wallet & Business
+                      </SectionTitle>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                        <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Total Coins</div>
+                          <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b' }}>
+                            {editMode ? (
+                              <EditableField
+                                type="number"
+                                value={editedUser?.totalCoins || 0}
+                                onChange={(e) => setEditedUser({ ...editedUser!, totalCoins: parseInt(e.target.value) || 0 })}
+                              />
+                            ) : (
+                              selectedUser.totalCoins || 0
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Wallet Balance</div>
+                          <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', display: 'flex', alignItems: 'center' }}>
+                            ₹
+                            {editMode ? (
+                              <EditableField
+                                type="number"
+                                value={editedUser?.wallet_balance || 0}
+                                onChange={(e) => setEditedUser({ ...editedUser!, wallet_balance: parseInt(e.target.value) || 0 })}
+                                style={{ marginLeft: '4px' }}
+                              />
+                            ) : (
+                              selectedUser.wallet_balance || 0
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Referral Coins</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b' }}>
+                          {editMode ? (
+                            <EditableField
+                              type="number"
+                              value={editedUser?.referralCoins || 0}
+                              onChange={(e) => setEditedUser({ ...editedUser!, referralCoins: parseInt(e.target.value) || 0 })}
+                            />
+                          ) : (
+                            selectedUser.referralCoins || 0
                           )}
                         </div>
-                        <AddressText>
-                          {address.addressLine || (
-                            `${address.floor ? `Floor ${address.floor}, ` : ''}${address.apartment ? `${address.apartment}, ` : ''}${address.street}, ${address.city}, ${address.state} - ${address.pincode}${address.landmark ? `\nLandmark: ${address.landmark}` : ''}`
+                      </div>
+
+
+
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Deposit Money</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', display: 'flex', alignItems: 'center' }}>
+                          ₹
+                          {editMode ? (
+                            <EditableField
+                              type="number"
+                              value={editedUser?.depositMoney || 0}
+                              onChange={(e) => setEditedUser({ ...editedUser!, depositMoney: parseInt(e.target.value) || 0 })}
+                              style={{ marginLeft: '4px' }}
+                            />
+                          ) : (
+                            selectedUser.depositMoney || 0
                           )}
-                        </AddressText>
-                        <ActionButton
-                          variant="secondary"
-                          onClick={() => handleNavigation(address)}
-                          style={{ marginTop: '8px', padding: '4px 8px' }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Completed Referrals</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#10b981' }}>
+                          {selectedReferralStats.completed}
+                        </div>
+                      </div>
+
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Pending Referrals</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#f59e0b' }}>
+                          {selectedReferralStats.pending}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Hold Jars</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b' }}>
+                          {editMode ? (
+                            <EditableField
+                              type="number"
+                              value={editedUser?.jars_occupied || 0}
+                              onChange={(e) => setEditedUser({ ...editedUser!, jars_occupied: parseInt(e.target.value) || 0 })}
+                            />
+                          ) : (
+                            selectedUser.jars_occupied || 0
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Subscription</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: selectedUser.subscription?.isActive === true ? '#10b981' : '#dc2626' }}>
+                          {selectedUser.subscription?.isActive === true ? 'Active' : 'Inactive'}
+                        </div>
+                      </div>
+                    </div>
+                </InfoGrid>
+              </UserDetailGrid>
+
+              <div style={{ marginTop: '2rem' }}>
+                <SectionTitle>
+                  <FiPackage /> Order Statistics
+                </SectionTitle>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Total Completed Orders</div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#28a745' }}>
+                      {selectedUser.totalCompletedOrders || 0}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Total Cancelled Orders</div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#dc3545' }}>
+                      {selectedUser.totalCancelledOrders || 0}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>First Order Date</div>
+                    <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#17a2b8' }}>
+                      {selectedUser.firstOrderDate ? formatDate(selectedUser.firstOrderDate) : 'No orders'}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Last Order Date</div>
+                    <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#17a2b8' }}>
+                      {selectedUser.lastOrderDate ? formatDate(selectedUser.lastOrderDate) : 'No orders'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: '2rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <SectionTitle>
+                    <FiCheckCircle /> Subscription Management
+                  </SectionTitle>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {!subscriptionEditMode && selectedUser.subscription && (
+                      <>
+                        <Button
+                          variant="primary"
+                          onClick={() => setSubscriptionEditMode(true)}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
                         >
-                          <FiNavigation size={12} />
-                          Navigate
-                        </ActionButton>
-                      </AddressCard>
-                    ))}
-                  </DetailSection>
-                )}
+                          <FiEdit3 size={12} /> Edit
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={handleSubscriptionPause}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          <FiXCircle size={12} /> Pause
+                        </Button>
+                        <Button
+                          variant="danger"
+                          onClick={handleSubscriptionDelete}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          <FiX size={12} /> Delete
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
 
-                <ButtonGroup>
-                  {editMode ? (
-                    <>
-                      <ActionButton
-                        variant="primary"
-                        onClick={handleSave}
-                        disabled={saving}
-                      >
-                        <FiSave />
-                        {saving ? 'Saving...' : 'Save Changes'}
-                      </ActionButton>
-                      <ActionButton
-                        variant="secondary"
-                        onClick={() => {
-                          setEditMode(false);
-                          setEditedUser(selectedUser);
-                        }}
-                      >
-                        <FiX />
-                        Cancel
-                      </ActionButton>
-                    </>
-                  ) : (
-                    <>
-                      <ActionButton
-                        variant="primary"
-                        onClick={() => setEditMode(true)}
-                      >
-                        <FiEdit3 />
-                        Edit Details
-                      </ActionButton>
-                      <ActionButton
-                        variant="danger"
-                        onClick={handleDelete}
-                        disabled={saving}
-                      >
-                        <FiX />
-                        {saving ? 'Deleting...' : 'Delete User'}
-                      </ActionButton>
-                    </>
-                  )}
-                </ButtonGroup>
-              </ModalBody>
-            </ModalContent>
+                {selectedUser.subscription ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                    <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Plan / Format</div>
+                      <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#8e2de2' }}>
+                        {selectedUser.subscription.planType === 'monthly' ? 'Monthly Flexible' : selectedUser.subscription.plan}
+                      </div>
+                    </div>
+
+                    {selectedUser.subscription.planType === 'monthly' && (
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Monthly Target Jars</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                          {selectedUser.subscription.totalMonthlyJars || 0}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedUser.subscription.planType === 'monthly' && (
+                      <div style={{ padding: '1rem', background: '#e0f2fe', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#0369a1', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Cycle Progress & Rollover</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#0f172a' }}>
+                          {selectedUser.subscription.jarsDeliveredThisCycle || 0} Delivered
+                          {selectedUser.subscription.carryForwardJars > 0 && <span style={{ color: '#0369a1', marginLeft: 8 }}>(+{selectedUser.subscription.carryForwardJars} Rollover)</span>}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedUser.subscription.frequency && (
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Frequency</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                          {selectedUser.subscription.frequency.charAt(0).toUpperCase() + selectedUser.subscription.frequency.slice(1)}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedUser.subscription.deliveryDays && selectedUser.subscription.deliveryDays.length > 0 && (
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Delivery Days</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                          {selectedUser.subscription.deliveryDays.join(', ')}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedUser.subscription.planPrice && (
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Plan Price</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>₹{selectedUser.subscription.planPrice}</div>
+                      </div>
+                    )}
+
+                    <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Start Date</div>
+                      <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                        {formatDate(selectedUser.subscription.startDate)}
+                      </div>
+                    </div>
+
+                    {selectedUser.subscription.nextDelivery && (
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Next Delivery</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#28a745' }}>
+                          {formatDate(selectedUser.subscription.nextDelivery)}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedUser.subscription.deliverySlot && (
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Delivery Slot</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                          {selectedUser.subscription.deliverySlot}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedUser.subscription.totalDeliveries && (
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Total Deliveries</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
+                          {selectedUser.subscription.totalDeliveries}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedUser.subscription.remainingDeliveries !== undefined && (
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Remaining Deliveries</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: selectedUser.subscription.remainingDeliveries > 0 ? '#28a745' : '#dc3545' }}>
+                          {selectedUser.subscription.remainingDeliveries}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedUser.subscription.pausedUntil && (
+                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Paused Until</div>
+                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#f59e0b' }}>
+                          {formatDate(selectedUser.subscription.pausedUntil)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ padding: '1.5rem', textAlign: 'center', color: '#666', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <p>No subscription found. Click Edit to create a new subscription.</p>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginTop: '2rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <SectionTitle>
+                    <FiMapPin /> Saved Addresses ({selectedUser.addresses.length})
+                  </SectionTitle>
+                  <Button
+                    variant="primary"
+                    onClick={async () => {
+                      // Create new address form
+                      const type = prompt('Address Type (e.g., Home, Office, etc.):', 'Home') || 'Home';
+                      const addressLine = prompt('Full Address:', '') || '';
+                      const street = prompt('Street:', '') || '';
+                      const city = prompt('City:', '') || 'Kolkata';
+                      const state = prompt('State:', '') || 'West Bengal';
+                      const pincode = prompt('Pincode:', '') || '';
+                      const floor = prompt('Floor (optional):', '') || '';
+                      const apartment = prompt('Apartment (optional):', '') || '';
+                      const landmark = prompt('Landmark (optional):', '') || '';
+                      const isDefault = confirm('Should this be the default address?');
+
+                      if (type && (addressLine || street)) {
+                        try {
+                          const newAddressData = {
+                            userId: selectedUser!.id,
+                            address_type: type,
+                            address_line: addressLine,
+                            street,
+                            city,
+                            state,
+                            pincode,
+                            floor,
+                            apartment,
+                            landmark,
+                            isDefault,
+                            createdAt: new Date(),
+                            updatedAt: new Date()
+                          };
+
+                          const docRef = await addDocument('addresses', newAddressData);
+
+                          // Update the local state
+                          if (selectedUser) {
+                            const newAddress = {
+                              id: docRef.id,
+                              ...newAddressData
+                            };
+
+                            setSelectedUser({
+                              ...selectedUser,
+                              addresses: [...selectedUser.addresses, {
+                                id: newAddress.id,
+                                userId: newAddress.userId,
+                                type: newAddress.address_type,
+                                addressLine: newAddress.address_line,
+                                street: newAddress.street,
+                                city: newAddress.city,
+                                state: newAddress.state,
+                                pincode: newAddress.pincode,
+                                floor: newAddress.floor,
+                                apartment: newAddress.apartment,
+                                landmark: newAddress.landmark,
+                                isDefault: newAddress.isDefault,
+                                createdAt: newAddress.createdAt
+                              }]
+                            });
+
+                            alert('New address added successfully!');
+                          }
+                        } catch (error) {
+                          console.error('Error adding address:', error);
+                          alert('Error adding address. Please try again.');
+                        }
+                      }
+                    }}
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                  >
+                    <FiEdit3 size={12} /> Manage Addresses
+                  </Button>
+                </div>
+
+                {selectedUser.addresses.length > 0 ? (
+                  selectedUser.addresses.map((address) => (
+                    <div key={address.id} style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '1rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                        <div style={{ background: '#e0e7ff', color: '#4338ca', padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase' }}>
+                          {address.type}
+                        </div>
+                        {address.isDefault && (
+                          <div style={{
+                            background: '#dcfce7',
+                            color: '#16a34a',
+                            fontSize: '0.7rem',
+                            padding: '0.125rem 0.5rem',
+                            borderRadius: '9999px',
+                            fontWeight: '700',
+                            textTransform: 'uppercase'
+                          }}>
+                            DEFAULT
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.875rem', color: '#475569', lineHeight: '1.5', marginBottom: '0.75rem' }}>
+                        {address.addressLine || (
+                          `${address.floor ? `Floor ${address.floor}, ` : ''}${address.apartment ? `${address.apartment}, ` : ''}${address.street}, ${address.city}, ${address.state} - ${address.pincode}${address.landmark ? `\nLandmark: ${address.landmark}` : ''}`
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <Button
+                          variant="secondary"
+                          onClick={() => openMap(address)}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          <FiNavigation size={12} /> Navigate
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={async () => {
+                            // Create an address edit form
+                            const type = prompt('Address Type:', address.type) || address.type;
+                            const addressLine = prompt('Full Address:', address.addressLine || '') || address.addressLine || '';
+                            const street = prompt('Street:', address.street || '') || address.street || '';
+                            const city = prompt('City:', address.city || 'Kolkata') || 'Kolkata';
+                            const state = prompt('State:', address.state || 'West Bengal') || 'West Bengal';
+                            const pincode = prompt('Pincode:', address.pincode || '') || address.pincode || '';
+                            const floor = prompt('Floor (optional):', address.floor || '') || '';
+                            const apartment = prompt('Apartment (optional):', address.apartment || '') || '';
+                            const landmark = prompt('Landmark (optional):', address.landmark || '') || '';
+                            const isDefault = confirm(`Should this be the default address? Current: ${address.isDefault}`);
+
+                            if (type && (addressLine || street)) {
+                              try {
+                                await updateDocument('addresses', address.id, {
+                                  address_type: type,
+                                  address_line: addressLine,
+                                  street,
+                                  city,
+                                  state,
+                                  pincode,
+                                  floor,
+                                  apartment,
+                                  landmark,
+                                  isDefault,
+                                  updatedAt: new Date()
+                                });
+
+                                // Update the local state
+                                if (selectedUser) {
+                                  const updatedAddresses = selectedUser.addresses.map(addr =>
+                                    addr.id === address.id
+                                      ? { ...addr, type, addressLine, street, city, state, pincode, floor, apartment, landmark, isDefault }
+                                      : addr
+                                  );
+
+                                  setSelectedUser({
+                                    ...selectedUser,
+                                    addresses: updatedAddresses
+                                  });
+
+                                  alert('Address updated successfully!');
+                                }
+                              } catch (error) {
+                                console.error('Error updating address:', error);
+                                alert('Error updating address. Please try again.');
+                              }
+                            }
+                          }}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          <FiEdit3 size={12} /> Edit
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ padding: '1.5rem', textAlign: 'center', color: '#666', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <p>No addresses found for this user.</p>
+                  </div>
+                )}
+              </div>
+
+              <ActionRow>
+                {editMode ? (
+                  <>
+                    <Button
+                      variant="primary"
+                      onClick={handleSave}
+                      disabled={saving}
+                    >
+                      <FiSave />
+                      {saving ? 'Saving...' : 'Save Changes'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setEditMode(false);
+                        setEditedUser(selectedUser);
+                      }}
+                    >
+                      <FiX />
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="primary"
+                      onClick={() => setEditMode(true)}
+                    >
+                      <FiEdit3 />
+                      Edit Details
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={handleDelete}
+                      disabled={saving}
+                    >
+                      <FiX />
+                      {saving ? 'Deleting...' : 'Delete User'}
+                    </Button>
+                  </>
+                )}
+              </ActionRow>
+            </ModalBody>
+          </ModalContent>
           </ModalOverlay>
         )}
-      </AnimatePresence>
-    </UsersContainer>
+    </AnimatePresence>
+    </Container >
   );
 }

@@ -77,5 +77,10 @@ service cloud.firestore {
       allow write, update, delete: if request.auth != null && 
         (resource == null || resource.data.userId == request.auth.uid || isAdmin());
     }
+    
+    // Admin notifications collection - only admins can read/write
+    match /admin_notifications/{document} {
+      allow read, write, update, delete, list: if isAdmin();
+    }
   }
 }

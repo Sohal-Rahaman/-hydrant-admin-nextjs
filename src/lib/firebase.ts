@@ -14,13 +14,25 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase only if API key is present (to avoid build-time errors)
+let app;
+try {
+  if (firebaseConfig.apiKey) {
+    app = initializeApp(firebaseConfig);
+  } else {
+    // During build time, env vars might be missing. Initialize with a placeholder or skip.
+    console.warn('⚠️ Firebase API Key missing. Skipping initialization (likely build time).');
+    app = initializeApp({ ...firebaseConfig, apiKey: 'build-placeholder' });
+  }
+} catch (e) {
+  console.error('Firebase initialization error:', e);
+}
 
 // Initialize Firebase services
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
+
 
 // Authentication provider
 export const googleProvider = new GoogleAuthProvider();
@@ -185,10 +197,21 @@ interface PincodeAnalytics {
   };
 }
 
+function extractPincode(order: { address?: { pincode?: string }; deliveryAddress?: { fullAddress?: string; pincode?: string; pinCode?: string } }): string {
+  const addr = order.address;
+  const del = order.deliveryAddress;
+  if (addr?.pincode) return addr.pincode;
+  if (del?.pincode) return del.pincode;
+  if (del?.pinCode) return del.pinCode;
+  const full = del?.fullAddress || '';
+  const match = full.match(/\b(\d{6})\b/);
+  return match ? match[1] : 'unknown';
+}
+
 export const getPincodeAnalytics = (orders: OrderData[]): PincodeAnalytics => {
   const analytics: PincodeAnalyticsTemp = {};
   orders.forEach(order => {
-    const pincode = order.address?.pincode || 'unknown';
+    const pincode = extractPincode(order);
     if (!analytics[pincode]) {
       analytics[pincode] = {
         totalOrders: 0,
@@ -207,7 +230,7 @@ export const getPincodeAnalytics = (orders: OrderData[]): PincodeAnalytics => {
       analytics[pincode].cancelledOrders++;
     }
     
-    analytics[pincode].uniqueCustomers.add(order.userId);
+    analytics[pincode].uniqueCustomers.add(order.userId || (order as { customerId?: string }).customerId || '');
   });
   
   // Convert Set to count and return proper analytics

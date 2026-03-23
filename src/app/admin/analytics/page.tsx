@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { normalizeOrderStatus, isOpenOrderStatus } from '@/lib/orderStatus';
 import Image from 'next/image';
 import styled from 'styled-components';
 import { motion } from 'framer-motion';
@@ -13,7 +14,8 @@ import {
   FiDollarSign,
   FiPackage,
   FiUsers,
-  FiRefreshCw
+  FiRefreshCw,
+  FiDownload
 } from 'react-icons/fi';
 import {
   LineChart,
@@ -33,7 +35,8 @@ import {
   Area
 } from 'recharts';
 import { subscribeToCollection } from '@/lib/firebase';
-import { doc, onSnapshot, getFirestore } from 'firebase/firestore';
+import { doc, onSnapshot, getFirestore, collection, getDocs } from 'firebase/firestore';
+import { generateCSV, downloadCSV, generateFilename, UserDataForCSV } from '@/lib/csvExport';
 
 const AnalyticsContainer = styled.div`
   padding: 20px;
@@ -101,7 +104,7 @@ const StatsOverview = styled.div`
   margin-bottom: 30px;
 `;
 
-const StatCard = styled(motion.div)<{ color?: string }>`
+const StatCard = styled(motion.div) <{ color?: string }>`
   background: white;
   padding: 20px;
   border-radius: 12px;
@@ -273,6 +276,7 @@ export default function AnalyticsPage() {
   const [orders, setOrders] = useState<OrderData[]>([]);
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [csvDownloading, setCsvDownloading] = useState(false);
   const [stats, setStats] = useState({
     todayRevenue: 0,
     processingOrders: 0,
@@ -283,6 +287,10 @@ export default function AnalyticsPage() {
   });
   const [dailyOrdersData, setDailyOrdersData] = useState<DailyData[]>([]);
   const [orderStatusData, setOrderStatusData] = useState<StatusData[]>([]);
+
+  // Use refs to track latest data without causing re-renders
+  const ordersRef = useRef<OrderData[]>([]);
+  const usersRef = useRef<UserData[]>([]);
   const [revenueData, setRevenueData] = useState<RevenueData[]>([]);
 
   useEffect(() => {
@@ -296,7 +304,7 @@ export default function AnalyticsPage() {
         if (docSnapshot.exists()) {
           const liveStats = docSnapshot.data();
           console.log('📊 Live Dashboard Stats from Firebase:', liveStats);
-          
+
           setStats({
             todayRevenue: liveStats.todayRevenue || 0,
             processingOrders: liveStats.processingOrders || 0,
@@ -307,8 +315,7 @@ export default function AnalyticsPage() {
           });
         } else {
           console.log('⚠️ Dashboard stats document does not exist, using fallback calculation');
-          // Fallback to calculation if document doesn't exist
-          processOrdersData(orders, users);
+          // Fallback: stats will be calculated when orders/users are loaded below
         }
       },
       (error) => {
@@ -323,13 +330,17 @@ export default function AnalyticsPage() {
           id: doc.id,
           ...doc.data(),
           createdAt: doc.data().createdAt || new Date(),
-          status: doc.data().status || 'pending',
+          status: normalizeOrderStatus(doc.data().status),
           quantity: doc.data().items?.[0]?.quantity || doc.data().quantity || 1,
           amount: doc.data().total || doc.data().amount || 37
         })) as OrderData[];
-        
+
         setOrders(ordersData);
-        processOrdersData(ordersData, users);
+        ordersRef.current = ordersData;
+        // Process data with latest values from refs
+        if (usersRef.current.length > 0) {
+          processOrdersData(ordersData, usersRef.current);
+        }
       } catch (error) {
         console.error('❌ Error processing orders data:', error);
         setOrders([]);
@@ -347,9 +358,13 @@ export default function AnalyticsPage() {
           ...doc.data(),
           createdAt: doc.data().createdAt || new Date()
         })) as UserData[];
-        
+
         setUsers(usersData);
-        processOrdersData(orders, usersData);
+        usersRef.current = usersData;
+        // Process data with latest values from refs
+        if (ordersRef.current.length > 0) {
+          processOrdersData(ordersRef.current, usersData);
+        }
       } catch (error) {
         console.error('❌ Error processing users data:', error);
         setUsers([]);
@@ -366,7 +381,7 @@ export default function AnalyticsPage() {
       unsubscribeOrders();
       unsubscribeUsers();
     };
-  }, [orders, users]);
+  }, []); // Empty dependency array - only run once on mount
 
   const processOrdersData = (ordersData: OrderData[], usersData: UserData[]) => {
     // Calculate KPI stats
@@ -387,18 +402,16 @@ export default function AnalyticsPage() {
       return joinDate >= today && joinDate < tomorrow;
     }).length;
 
-    // Today&apos;s revenue
-    const todayDeliveredOrders = todayOrders.filter(order => order.status === 'completed');
+    // Today's revenue
+    const todayDeliveredOrders = todayOrders.filter(order => normalizeOrderStatus(order.status) === 'completed');
     const todayDeliveredQuantity = todayDeliveredOrders.reduce((sum, order) => sum + order.quantity, 0);
     const todayRevenue = todayDeliveredQuantity * 37;
 
-    // Processing orders
-    const processingOrders = ordersData.filter(order => 
-      order.status === 'pending' || order.status === 'processing'
-    ).length;
+    // Processing orders (includes placed, confirmed, in_progress, out_for_delivery from iOS)
+    const processingOrders = ordersData.filter(order => isOpenOrderStatus(order.status)).length;
 
     // Total revenue
-    const allDeliveredOrders = ordersData.filter(order => order.status === 'completed');
+    const allDeliveredOrders = ordersData.filter(order => normalizeOrderStatus(order.status) === 'completed');
     const totalDeliveredQuantity = allDeliveredOrders.reduce((sum, order) => sum + order.quantity, 0);
     const totalRevenue = totalDeliveredQuantity * 37;
 
@@ -425,7 +438,7 @@ export default function AnalyticsPage() {
         return orderDate >= date && orderDate < nextDate;
       });
 
-      const dayDelivered = dayOrders.filter(order => order.status === 'completed');
+      const dayDelivered = dayOrders.filter(order => normalizeOrderStatus(order.status) === 'completed');
       const dayQuantity = dayOrders.reduce((sum, order) => sum + order.quantity, 0);
       const dayRevenue = dayDelivered.reduce((sum, order) => sum + order.quantity, 0) * 37;
 
@@ -439,9 +452,10 @@ export default function AnalyticsPage() {
     }
     setDailyOrdersData(dailyData);
 
-    // Order status distribution
+    // Order status distribution (normalized for consistent grouping)
     const statusCount: Record<string, number> = ordersData.reduce((acc, order) => {
-      acc[order.status] = (acc[order.status] || 0) + 1;
+      const n = normalizeOrderStatus(order.status);
+      acc[n] = (acc[n] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
@@ -468,6 +482,95 @@ export default function AnalyticsPage() {
     }, 1000);
   };
 
+  const downloadUserDataCSV = async () => {
+    setCsvDownloading(true);
+
+    try {
+      const db = getFirestore();
+
+      // Fetch all users
+      const usersSnapshot = await getDocs(collection(db, 'users'));
+
+      // Fetch all addresses
+      const addressesSnapshot = await getDocs(collection(db, 'addresses'));
+      const addressesMap: Record<string, any[]> = {};
+      addressesSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        const userId = data.userId;
+        if (!addressesMap[userId]) {
+          addressesMap[userId] = [];
+        }
+        addressesMap[userId].push({
+          id: doc.id,
+          ...data
+        });
+      });
+
+      // Fetch all orders
+      const ordersSnapshot = await getDocs(collection(db, 'orders'));
+      const ordersMap: Record<string, any[]> = {};
+      ordersSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        const userId = data.userId;
+        if (!ordersMap[userId]) {
+          ordersMap[userId] = [];
+        }
+        ordersMap[userId].push({
+          id: doc.id,
+          ...data
+        });
+      });
+
+      // Fetch all subscriptions
+      const subscriptionsSnapshot = await getDocs(collection(db, 'subscriptions'));
+      const subscriptionsMap: Record<string, any> = {};
+      subscriptionsSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        const userId = data.userId;
+        subscriptionsMap[userId] = {
+          id: doc.id,
+          ...data
+        };
+      });
+
+      // Aggregate user data
+      const usersData: UserDataForCSV[] = usersSnapshot.docs.map(doc => {
+        const userData = doc.data();
+        const userId = doc.id;
+
+        return {
+          id: userId,
+          customerId: userData.customerId || 'N/A',
+          name: userData.name || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'N/A',
+          email: userData.email || 'N/A',
+          phoneNumber: userData.phoneNumber || userData.phone || 'N/A',
+          wallet_balance: userData.wallet_balance || userData.walletBalance || 0,
+          totalCoins: userData.totalCoins || 0,
+          totalShares: userData.totalShares || 0,
+          jars_occupied: userData.jars_occupied || userData.holdJars || 0,
+          createdAt: userData.createdAt || new Date(),
+          addresses: addressesMap[userId] || [],
+          orders: ordersMap[userId] || [],
+          subscription: subscriptionsMap[userId]
+        };
+      });
+
+      // Generate CSV
+      const csvContent = generateCSV(usersData);
+
+      // Download CSV
+      const filename = generateFilename('hydrant_users_data');
+      downloadCSV(csvContent, filename);
+
+      console.log(`✅ Successfully exported ${usersData.length} users to CSV`);
+    } catch (error) {
+      console.error('❌ Error downloading user data CSV:', error);
+      alert('Error generating CSV. Please try again.');
+    } finally {
+      setCsvDownloading(false);
+    }
+  };
+
   if (loading) {
     return (
       <LoadingSpinner>
@@ -480,22 +583,38 @@ export default function AnalyticsPage() {
     <AnalyticsContainer>
       <Header>
         <TitleSection>
-          <AnalyticsLogo 
-            src="/logo.jpeg" 
+          <AnalyticsLogo
+            src="/logo.jpeg"
             alt="Hydrant Logo"
             width={45}
             height={45}
           />
           <Title>Analytics Dashboard</Title>
         </TitleSection>
-        <RefreshButton
-          onClick={refreshData}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-        >
-          <FiRefreshCw />
-          Refresh Data
-        </RefreshButton>
+        <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
+          <RefreshButton
+            onClick={downloadUserDataCSV}
+            disabled={csvDownloading}
+            whileHover={{ scale: csvDownloading ? 1 : 1.02 }}
+            whileTap={{ scale: csvDownloading ? 1 : 0.98 }}
+            style={{
+              background: csvDownloading
+                ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                : 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+            }}
+          >
+            {csvDownloading ? <FiRefreshCw /> : <FiDownload />}
+            {csvDownloading ? 'Generating CSV...' : 'Download User Data CSV'}
+          </RefreshButton>
+          <RefreshButton
+            onClick={refreshData}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <FiRefreshCw />
+            Refresh Data
+          </RefreshButton>
+        </div>
       </Header>
 
       <InfoBox>
@@ -610,20 +729,20 @@ export default function AnalyticsPage() {
             <AreaChart data={dailyOrdersData}>
               <defs>
                 <linearGradient id="colorOrders" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={COLORS.primary} stopOpacity={0.8}/>
-                  <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0.1}/>
+                  <stop offset="5%" stopColor={COLORS.primary} stopOpacity={0.8} />
+                  <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0.1} />
                 </linearGradient>
                 <linearGradient id="colorQuantity" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={COLORS.success} stopOpacity={0.8}/>
-                  <stop offset="95%" stopColor={COLORS.success} stopOpacity={0.1}/>
+                  <stop offset="5%" stopColor={COLORS.success} stopOpacity={0.8} />
+                  <stop offset="95%" stopColor={COLORS.success} stopOpacity={0.1} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="date" stroke="#666" />
               <YAxis stroke="#666" />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'white', 
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: 'white',
                   border: '1px solid #e0e0e0',
                   borderRadius: '8px',
                   boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
@@ -675,13 +794,13 @@ export default function AnalyticsPage() {
                   <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip 
+              <Tooltip
                 formatter={(value: any, name: any, props: any) => [
                   `${value} orders (${props.payload.percentage}%)`,
                   name
                 ]}
-                contentStyle={{ 
-                  backgroundColor: 'white', 
+                contentStyle={{
+                  backgroundColor: 'white',
                   border: '1px solid #e0e0e0',
                   borderRadius: '8px',
                   boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
@@ -710,13 +829,13 @@ export default function AnalyticsPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="date" stroke="#666" />
               <YAxis stroke="#666" />
-              <Tooltip 
+              <Tooltip
                 formatter={(value: any, name: any) => [
                   name === 'revenue' ? `₹${value}` : value,
                   name === 'revenue' ? 'Revenue' : 'Delivered Orders'
                 ]}
-                contentStyle={{ 
-                  backgroundColor: 'white', 
+                contentStyle={{
+                  backgroundColor: 'white',
                   border: '1px solid #e0e0e0',
                   borderRadius: '8px',
                   boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
@@ -758,24 +877,24 @@ export default function AnalyticsPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="date" stroke="#666" />
               <YAxis stroke="#666" />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'white', 
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: 'white',
                   border: '1px solid #e0e0e0',
                   borderRadius: '8px',
                   boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
                 }}
               />
               <Legend />
-              <Bar 
-                dataKey="orders" 
-                fill={COLORS.primary} 
+              <Bar
+                dataKey="orders"
+                fill={COLORS.primary}
                 name="Total Orders"
                 radius={[4, 4, 0, 0]}
               />
-              <Bar 
-                dataKey="delivered" 
-                fill={COLORS.success} 
+              <Bar
+                dataKey="delivered"
+                fill={COLORS.success}
                 name="Delivered Orders"
                 radius={[4, 4, 0, 0]}
               />

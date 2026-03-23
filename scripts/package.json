@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "init-dashboard": "node init-dashboard.js",
-    "init-dashboard-stats": "node init-dashboard-stats.js"
+    "init-dashboard-stats": "node init-dashboard-stats.js",
+    "add-new100-coupon": "node addNew100Coupon.js"
   },
   "dependencies": {
     "firebase": "^10.7.1",

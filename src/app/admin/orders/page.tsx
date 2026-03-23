@@ -4,25 +4,27 @@ import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
+import {
   FiPackage, FiSearch, FiPhone, FiMapPin, FiClock,
   FiNavigation, FiCheckCircle, FiRefreshCw, FiUser, FiInfo, FiX, FiDollarSign
 } from 'react-icons/fi';
-import { 
-  subscribeToCollection, 
+import {
+  subscribeToCollection,
   updateDocument,
   triggerSubscriptionOrders,
   db
 } from '@/lib/firebase';
+import { normalizeOrderStatus } from '@/lib/orderStatus';
 import { collection, getDocs } from 'firebase/firestore';
+import { logActivity } from '@/lib/activityLogger';
+import { useAuth } from '@/context/AuthContext';
 
-// Interfaces
 interface Order {
   id: string;
   userId: string;
   userName?: string;
   userPhone?: string;
-  status: 'pending' | 'processing' | 'completed' | 'cancelled';
+  status: 'pending' | 'processing' | 'completed' | 'cancelled' | 'canceled' | 'placed' | 'confirmed' | 'in_progress' | 'out_for_delivery' | 'delivered';
   quantity: number;
   amount: number;
   address: {
@@ -33,7 +35,24 @@ interface Order {
   };
   createdAt: Date | { toDate(): Date } | string;
   orderType: 'regular' | 'subscription';
+  deliverySlot?: string;
+  deliveryDate?: string | Date | { toDate(): Date } | null;
+  isPriority?: boolean;
+  assignedPartner?: string;
+  plusCode?: string;
+  floorNumber?: string;
+  hasLift?: boolean;
+  isAddressVerified?: boolean;
+  bewareOfDogs?: boolean;
+  paymentMethod?: 'cash' | 'wallet' | 'upi';
+  deliveryPartner?: {
+    name: string;
+    phone: string;
+  };
+  updatedAt?: Date | { toDate(): Date } | string;
+  autoAssignAttempted?: boolean;
 }
+
 
 interface User {
   id: string;
@@ -44,6 +63,16 @@ interface User {
   customerId?: string;
   userId?: string;
 }
+
+interface ArmyMember {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  isOnline: boolean;
+  activeOrdersCount: number;
+}
+
+// PARTNER_DATA is now dynamic from the 'army' collection
 
 // Styled Components
 const Container = styled.div`padding: 20px; max-width: 1600px; margin: 0 auto;`;
@@ -84,22 +113,22 @@ const OrderSection = styled.div<{ type: string }>`
   border: 1px solid #f0f0f0; overflow: hidden;
   &::before {
     content: ''; display: block; height: 4px;
-    background: ${props => 
-      props.type === 'dum-dum' ? 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' :
+    background: ${props =>
+    props.type === 'dum-dum' ? 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' :
       props.type === 'salt-lake' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' :
-      props.type === 'subscription' ? 'linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)' :
-      'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-    };
+        props.type === 'subscription' ? 'linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)' :
+          'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+  };
   }
 `;
 
 const SectionHeader = styled.div`padding: 20px 25px 15px 25px; border-bottom: 1px solid #f0f0f0;`;
 const SectionTitle = styled.h2<{ type: string }>`
   margin: 0 0 8px 0; font-size: 1.3rem; font-weight: 700; display: flex; align-items: center; gap: 12px;
-  color: ${props => 
+  color: ${props =>
     props.type === 'dum-dum' ? '#1d4ed8' :
-    props.type === 'salt-lake' ? '#059669' : 
-    props.type === 'subscription' ? '#8e2de2' : '#d97706'
+      props.type === 'salt-lake' ? '#059669' :
+        props.type === 'subscription' ? '#8e2de2' : '#d97706'
   };
 `;
 
@@ -131,8 +160,10 @@ const OrderStatus = styled.span<{ status: string }>`
 const OrderActions = styled.div`display: flex; gap: 8px; margin-top: 15px; flex-wrap: wrap;`;
 
 const ActionBtn = styled.button<{ variant?: string }>`
-  padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer;
-  display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 0.8rem;
+  padding: 10px 12px; border-radius: 8px; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; font-size: 0.85rem;
+  flex: 1;
+  min-width: calc(50% - 10px);
   ${props => {
     switch (props.variant) {
       case 'call': return 'background: #10b981; color: white; &:hover { background: #059669; }';
@@ -173,10 +204,16 @@ const TextArea = styled.textarea`
 const ActionButton = styled.button<{ variant?: string }>`
   padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer;
   display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.9rem;
-  ${props => props.variant === 'primary' ? 
+  ${props => props.variant === 'primary' ?
     'background: linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%); color: white;' :
     'background: white; color: #374151; border: 2px solid #e5e7eb;'
   }
+`;
+
+const PartnerSelect = styled.select`
+  padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 6px;
+  font-size: 0.8rem; background: white; cursor: pointer;
+  &:focus { outline: none; border-color: #8e2de2; }
 `;
 
 const EmptyState = styled.div`text-align: center; padding: 40px 20px; color: #666;`;
@@ -223,6 +260,36 @@ const Tab = styled.button<{ $active: boolean }>`
   }
 `;
 
+const BulkAssignBar = styled.div`
+  background: white;
+  padding: 15px 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+  position: sticky;
+  top: 10px;
+  z-index: 100;
+`;
+
+const BulkAssignTitle = styled.h3`
+  margin: 0;
+  font-size: 1rem;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const BulkAssignActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+`;
+
 const TabBadge = styled.span`
   background: rgba(255, 255, 255, 0.2);
   color: white;
@@ -246,6 +313,7 @@ const InactiveTabBadge = styled.span`
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [armyMembers, setArmyMembers] = useState<ArmyMember[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -254,71 +322,70 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [activeTab, setActiveTab] = useState<'open' | 'completed' | 'cancelled'>('open');
+  const [bulkPartner, setBulkPartner] = useState('');
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
+  
+  // QR Code Payment state
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [selectedQRCodeOrder, setSelectedQRCodeOrder] = useState<Order | null>(null);
 
   const formatDate = (date: Date | { toDate(): Date } | string | number | null | undefined): string => {
     if (!date) return 'N/A';
     try {
-      if (typeof date === 'string') return new Date(date).toLocaleString();
-      if (date instanceof Date) return date.toLocaleString();
-      if (typeof date === 'object' && 'toDate' in date) return date.toDate().toLocaleString();
-      return 'Invalid Date';
+      let d: Date;
+      if (typeof date === 'string') d = new Date(date);
+      else if (date instanceof Date) d = date;
+      else if (typeof date === 'object' && 'toDate' in date) d = date.toDate();
+      else if (typeof date === 'number') d = new Date(date);
+      else return 'Invalid Date';
+
+      return d.toLocaleString('en-IN', {
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+      });
     } catch { return 'Invalid Date'; }
   };
 
-  const getUserDetails = (userIdentifier: string) => {
-    // Try to find user by userId first, then by customerId
-    return users.find(user => 
-      user.id === userIdentifier || 
-      user.customerId === userIdentifier ||
-      user.userId === userIdentifier
-    );
+  const getUserDetails = (identifier: string | undefined): User | undefined => {
+    if (!identifier) return undefined;
+    const cleanId = identifier.toString().trim();
+    const phoneNo = cleanId.replace('+91', '').replace(/\s/g, '');
+    
+    return users.find(u => {
+      const uPhone = u.phoneNumber?.toString().replace(/\s/g, '');
+      const uId = u.id?.toString();
+      const uCustId = u.customerId?.toString();
+      const uUserId = u.userId?.toString();
+
+      return (
+        uId === cleanId || 
+        uCustId === cleanId || 
+        uUserId === cleanId ||
+        uPhone === phoneNo ||
+        (uPhone && phoneNo.includes(uPhone)) ||
+        (phoneNo && uPhone?.includes(phoneNo))
+      );
+    });
   };
 
   useEffect(() => {
     setLoading(true);
-    console.log('🔍 Setting up Firebase orders subscription...');
-
     const unsubscribeOrders = subscribeToCollection('orders', (snapshot) => {
-      console.log('📦 Firebase orders snapshot received:', {
-        totalDocs: snapshot.docs.length,
-        isEmpty: snapshot.empty,
-        size: snapshot.size
-      });
-      
       if (snapshot.empty) {
-        console.warn('⚠️ Orders collection is empty or not found');
         setOrders([]);
         setFilteredOrders([]);
         return;
       }
 
       try {
-        const ordersData = snapshot.docs.map((doc, index) => {
+        const ordersData = snapshot.docs.map((doc) => {
           const data = doc.data();
-          console.log(`📋 Order ${index + 1}:`, {
-            id: doc.id,
-            rawData: data,
-            customerName: data.customerName,
-            customerPhone: data.customerPhone,
-            customerEmail: data.customerEmail,
-            customerId: data.customerId,
-            userId: data.userId,
-            deliveryAddress: data.deliveryAddress,
-            items: data.items,
-            status: data.status,
-            orderNumber: data.orderNumber,
-            total: data.total
-          });
-          
-          // Extract pincode from fullAddress string
           const extractPincodeFromAddress = (address: string): string => {
             if (!address) return 'UNKNOWN';
-            // Look for 6-digit pincode pattern in address
             const pincodeMatch = address.match(/\b(\d{6})\b/);
             return pincodeMatch ? pincodeMatch[1] : 'UNKNOWN';
           };
-          
-          // More flexible data mapping to handle actual Firebase structure
+
           const mappedOrder: Order = {
             id: doc.id,
             userId: data.userId || data.customerId || '',
@@ -334,78 +401,23 @@ export default function OrdersPage() {
               full: data.deliveryAddress?.fullAddress || ''
             },
             createdAt: data.createdAt || data.orderDate || data.timestamp || new Date(),
-            orderType: data.orderType || (data.subscriptionId ? 'subscription' : 'regular')
+            orderType: data.orderType || (data.subscriptionId ? 'subscription' : 'regular'),
+            deliverySlot: data.deliverySlot,
+            deliveryDate: data.deliveryDate,
+            isPriority: data.isPriority,
+            assignedPartner: data.assignedPartner,
+            plusCode: data.plusCode || data.deliveryAddress?.plusCode,
+            floorNumber: data.floorNumber || data.deliveryAddress?.floor,
+            hasLift: data.hasLift ?? data.deliveryAddress?.hasLift,
+            isAddressVerified: data.isAddressVerified ?? data.deliveryAddress?.isVerified,
+            bewareOfDogs: data.bewareOfDogs ?? data.deliveryAddress?.bewareOfDogs,
+            paymentMethod: data.paymentMethod || 'cash',
+            updatedAt: data.updatedAt
           };
-          
-          // Normalize status values - handle any variations that might exist in the database
-          const statusMap: Record<string, Order['status']> = {
-            'pending': 'pending',
-            'processing': 'processing',
-            'completed': 'completed',
-            'cancelled': 'cancelled',
-            'delivered': 'completed', // Map delivered to completed as per previous fixes
-            'canceled': 'cancelled',  // Handle common typo
-          };
-          
-          if (mappedOrder.status in statusMap) {
-            mappedOrder.status = statusMap[mappedOrder.status];
-          } else if (!['pending', 'processing', 'completed', 'cancelled'].includes(mappedOrder.status)) {
-            console.warn('⚠️ Unexpected order status, defaulting to "pending":', {
-              orderId: doc.id,
-              status: mappedOrder.status,
-              rawData: data
-            });
-            mappedOrder.status = 'pending';
-          }
-          
-          // Debug log for order status mapping
-          console.log(`📊 Order Status Debug for Order ${index + 1}:`, {
-            orderId: doc.id,
-            firebaseStatus: data.status,
-            mappedStatus: mappedOrder.status,
-            isCompleted: mappedOrder.status === 'completed',
-            isCancelled: mappedOrder.status === 'cancelled'
-          });
-          
-          // Debug log for subscription order detection
-          if (data.subscriptionId || data.orderType === 'subscription') {
-            console.log('🔄 Subscription Order Detected:', {
-              orderId: doc.id,
-              subscriptionId: data.subscriptionId,
-              orderType: data.orderType,
-              userId: mappedOrder.userId,
-              status: mappedOrder.status
-            });
-          }
-          
-          // Debug log for address mapping
-          console.log(`🏠 Address Debug for Order ${index + 1}:`, {
-            orderId: doc.id,
-            customerName: data.customerName,
-            rawDeliveryAddress: data.deliveryAddress,
-            fullAddressFromFirebase: data.deliveryAddress?.fullAddress,
-            mappedAddressFull: mappedOrder.address.full,
-            allPossibleAddressFields: {
-              'deliveryAddress.fullAddress': data.deliveryAddress?.fullAddress,
-              'deliveryAddress.address': data.deliveryAddress?.address,
-              'deliveryAddress.street': data.deliveryAddress?.street,
-              'address': data.address,
-              'fullAddress': data.fullAddress,
-              'userAddress': data.userAddress,
-              'shippingAddress': data.shippingAddress
-            }
-          });
-          
-          console.log(`✅ Mapped Order ${index + 1}:`, mappedOrder);
+
+          mappedOrder.status = normalizeOrderStatus(data.status || mappedOrder.status);
           return mappedOrder;
-        }).filter((order) => {
-          // Only filter out orders that are completely invalid (no ID)
-          const isValid = order.id;
-          if (!isValid) {
-            console.warn('⚠️ Filtering out invalid order (no ID):', order);
-          }
-          return isValid;
-        }).sort((a, b) => {
+        }).filter((order) => order.id).sort((a, b) => {
           const getTimestamp = (date: Date | { toDate(): Date } | string): number => {
             try {
               if (typeof date === 'string') return new Date(date).getTime();
@@ -414,119 +426,74 @@ export default function OrdersPage() {
                 return date.toDate().getTime();
               }
               return new Date().getTime();
-            } catch {
-              return new Date().getTime();
-            }
+            } catch { return new Date().getTime(); }
           };
           return getTimestamp(a.createdAt) - getTimestamp(b.createdAt);
         });
-        
-        console.log('✅ Processed orders data:', {
-          totalOrders: ordersData.length,
-          orderStatuses: ordersData.map((o) => o.status),
-          pincodes: ordersData.map((o) => o.address.pincode),
-          uniquePincodes: [...new Set(ordersData.map((o) => o.address.pincode))],
-          dumDumCount: ordersData.filter((o) => o.address.pincode === '700030').length,
-          saltLakeCount: ordersData.filter((o) => o.address.pincode === '700074').length,
-          subscriptionCount: ordersData.filter((o) => o.orderType === 'subscription').length,
-          nonDeliveredCount: ordersData.filter((o) => o.status !== 'completed').length,
-          otherPincodesCount: ordersData.filter((o) => 
-            o.address.pincode !== '700030' && 
-            o.address.pincode !== '700074' && 
-            o.orderType !== 'subscription'
-          ).length,
-          otherPincodes: [...new Set(ordersData
-            .filter((o) => o.address.pincode !== '700030' && o.address.pincode !== '700074')
-            .map((o) => o.address.pincode)
-          )]
-        });
-        
+
         setOrders(ordersData);
         setFilteredOrders(ordersData);
       } catch (error) {
-        console.error('❌ Error processing orders data:', error);
+        console.error('Error processing orders data:', error);
         setOrders([]);
         setFilteredOrders([]);
       }
     }, [], (error) => {
-      console.error('❌ Firebase orders subscription error:', error);
-      alert(`Error connecting to Firebase orders: ${error.message}. Check console for details.`);
+      console.error('Firebase orders subscription error:', error);
     });
 
     const unsubscribeUsers = subscribeToCollection('users', (snapshot) => {
-      console.log('👥 Firebase users snapshot received:', {
-        totalUsers: snapshot.docs.length,
-        isEmpty: snapshot.empty
-      });
-      
       try {
-        const usersData = snapshot.docs.map(doc => ({ 
-          id: doc.id, 
+        const usersData = snapshot.docs.map(doc => ({
+          id: doc.id,
           ...doc.data(),
           phoneNumber: doc.data().phoneNumber || doc.data().phone || '',
-          wallet_balance: doc.data().wallet_balance || doc.data().walletBalance || 0, // Use wallet_balance for user app compatibility
-          jars_occupied: doc.data().jars_occupied || doc.data().holdJars || doc.data().occupiedJars || 0 // Use jars_occupied for user app compatibility
+          wallet_balance: doc.data().wallet_balance || doc.data().walletBalance || 0,
+          jars_occupied: doc.data().jars_occupied || doc.data().holdJars || doc.data().occupiedJars || 0,
         })) as User[];
-        console.log('✅ Processed users data:', usersData.length, 'users');
         setUsers(usersData);
       } catch (error) {
-        console.error('❌ Error processing users data:', error);
+        console.error('Error processing users data:', error);
         setUsers([]);
       }
     }, [], (error) => {
-      console.error('❌ Firebase users subscription error:', error);
+      console.error('Firebase users subscription error:', error);
       setUsers([]);
     });
 
-    setTimeout(() => setLoading(false), 2000);
+    const unsubscribeArmy = subscribeToCollection('army', (snapshot) => {
+      try {
+        const armyData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ArmyMember[];
+        setArmyMembers(armyData);
+      } catch (error) {
+        console.error('Error processing army data:', error);
+      }
+    }, [], (error) => {
+      console.error('Firebase army subscription error:', error);
+    });
 
-    return () => { unsubscribeOrders(); unsubscribeUsers(); };
+    setTimeout(() => setLoading(false), 2000);
+    return () => { unsubscribeOrders(); unsubscribeUsers(); unsubscribeArmy(); };
   }, []);
 
   useEffect(() => {
     let filtered = orders;
-    
-    // Debug log for filtering
-    console.log('🔍 Filtering orders for tab:', activeTab, {
-      totalOrders: orders.length,
-      completedCount: orders.filter(o => o.status === 'completed').length,
-      cancelledCount: orders.filter(o => o.status === 'cancelled').length,
-      pendingCount: orders.filter(o => o.status === 'pending').length,
-      processingCount: orders.filter(o => o.status === 'processing').length
-    });
-    
-    // Filter by tab first
     if (activeTab === 'open') {
-      // Only show pending and processing orders (exclude delivered and cancelled)
-      filtered = orders.filter(order => 
-        order.status === 'pending' || order.status === 'processing'
+      filtered = orders.filter(order =>
+        ['placed', 'pending', 'confirmed', 'processing', 'in_progress', 'out_for_delivery'].includes(order.status?.toLowerCase())
       );
-      console.log('📦 Open orders filtered:', filtered.length);
     } else if (activeTab === 'completed') {
-      // Only show completed orders
       filtered = orders.filter(order => {
-        const isCompleted = order.status === 'completed';
-        console.log(`✅ Order ${order.id} status check:`, {
-          status: order.status,
-          isCompleted: isCompleted
-        });
-        return isCompleted;
+        const status = order.status?.toLowerCase();
+        return status === 'completed' || status === 'delivered';
       });
-      console.log('✅ Completed orders filtered:', filtered.length);
     } else if (activeTab === 'cancelled') {
-      // Only show cancelled orders
       filtered = orders.filter(order => {
-        const isCancelled = order.status === 'cancelled';
-        console.log(`❌ Order ${order.id} status check:`, {
-          status: order.status,
-          isCancelled: isCancelled
-        });
-        return isCancelled;
+        const status = order.status?.toLowerCase();
+        return status === 'cancelled' || status === 'canceled';
       });
-      console.log('❌ Cancelled orders filtered:', filtered.length);
     }
-    
-    // Then apply search filter if there's a search term
+
     if (searchTerm) {
       filtered = filtered.filter(order => {
         const user = getUserDetails(order.userId);
@@ -539,171 +506,239 @@ export default function OrdersPage() {
         );
       });
     }
-    
     setFilteredOrders(filtered);
   }, [searchTerm, orders, users, activeTab]);
 
-  // Filter orders based on active tab and organize by sections
   const getOrdersBySection = () => {
-    console.log('🧮 Getting orders by section for tab:', activeTab, {
-      filteredOrdersCount: filteredOrders.length,
-      completedCount: filteredOrders.filter(o => o.status === 'completed').length,
-      cancelledCount: filteredOrders.filter(o => o.status === 'cancelled').length
-    });
-    
     if (activeTab === 'open') {
-      // For open orders: organize by pincode (only pending/processing)
-      const dumDumOrders = filteredOrders.filter(o => o.address.pincode === '700030' && (o.status === 'pending' || o.status === 'processing'));
-      const saltLakeOrders = filteredOrders.filter(o => o.address.pincode === '700074' && (o.status === 'pending' || o.status === 'processing'));
-      const subscriptionOrders = filteredOrders.filter(o => o.orderType === 'subscription' && (o.status === 'pending' || o.status === 'processing'));
-      const otherOrders = filteredOrders.filter(o => 
-        o.address.pincode !== '700030' && 
-        o.address.pincode !== '700074' && 
-        o.orderType !== 'subscription' &&
-        (o.status === 'pending' || o.status === 'processing')
+      const openStatuses = ['placed', 'pending', 'confirmed', 'processing', 'in_progress', 'out_for_delivery'];
+      const openOrders = filteredOrders.filter(o => openStatuses.includes(o.status?.toLowerCase()));
+      
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const getOrderDate = (date: any): Date | null => {
+        if (!date) return null;
+        try {
+          if (typeof date === 'string') return new Date(date);
+          if (date instanceof Date) return date;
+          if (typeof date === 'object' && 'toDate' in date) return date.toDate();
+          return null;
+        } catch { return null; }
+      };
+
+      const isSameDay = (d1: Date, d2: Date) => 
+        d1.getFullYear() === d2.getFullYear() && 
+        d1.getMonth() === d2.getMonth() && 
+        d1.getDate() === d2.getDate();
+
+      const todayOrders = openOrders.filter(o => {
+        const d = getOrderDate(o.deliveryDate || o.createdAt);
+        return d && isSameDay(d, today);
+      });
+
+      const todayMorning = todayOrders.filter(o => {
+        const slot = o.deliverySlot?.toLowerCase() || '';
+        return slot.includes('morning') || slot.includes('11:00');
+      });
+      const todayAfternoon = todayOrders.filter(o => {
+        const slot = o.deliverySlot?.toLowerCase() || '';
+        return slot.includes('afternoon') || slot.includes('2:30');
+      });
+      const todayEvening = todayOrders.filter(o => {
+        const slot = o.deliverySlot?.toLowerCase() || '';
+        return slot.includes('evening') || slot.includes('6:00');
+      });
+      const todayOther = todayOrders.filter(o => {
+        const slot = o.deliverySlot?.toLowerCase() || '';
+        const isMorning = slot.includes('morning') || slot.includes('11:00');
+        const isAfternoon = slot.includes('afternoon') || slot.includes('2:30');
+        const isEvening = slot.includes('evening') || slot.includes('6:00');
+        return !isMorning && !isAfternoon && !isEvening;
+      });
+
+      // Sort today's sub-sections by slot and then priority
+      const sortBySlot = (a: Order, b: Order) => {
+        if (a.isPriority && !b.isPriority) return -1;
+        if (!a.isPriority && b.isPriority) return 1;
+        return 0;
+      };
+
+      todayMorning.sort(sortBySlot);
+      todayAfternoon.sort(sortBySlot);
+      todayEvening.sort(sortBySlot);
+      todayOther.sort(sortBySlot);
+
+      const tomorrowOrders = openOrders.filter(o => {
+        const d = getOrderDate(o.deliveryDate || o.createdAt);
+        return d && isSameDay(d, tomorrow);
+      });
+
+      const futureOrders = openOrders.filter(o => {
+        const d = getOrderDate(o.deliveryDate || o.createdAt);
+        return d && d.getTime() > tomorrow.getTime() + 86400000; // After tomorrow
+      });
+
+      return { 
+        todayMorning, 
+        todayAfternoon, 
+        todayEvening, 
+        todayOther,
+        tomorrowOrders, 
+        futureOrders 
+      };
+    } else {
+      const getTimestamp = (date: any): number => {
+        try {
+          if (!date) return 0;
+          if (typeof date === 'string') return new Date(date).getTime();
+          if (date instanceof Date) return date.getTime();
+          if (typeof date === 'object' && 'toDate' in date) return date.toDate().getTime();
+          return 0;
+        } catch { return 0; }
+      };
+
+      const sortedAllOrders = [...filteredOrders].sort((a, b) => {
+        const timeA = getTimestamp(a.updatedAt || a.createdAt);
+        const timeB = getTimestamp(b.updatedAt || b.createdAt);
+        return timeB - timeA; // Descending (newest first)
+      });
+
+      return {
+        allOrders: sortedAllOrders,
+        todayMorning: [], todayAfternoon: [], todayEvening: [], todayOther: [],
+        tomorrowOrders: [], futureOrders: []
+      };
+    };
+  };
+
+  const { todayMorning, todayAfternoon, todayEvening, todayOther, tomorrowOrders, futureOrders, allOrders } = getOrdersBySection();
+
+  const openOrdersCount = orders.filter(o => ['placed', 'pending', 'confirmed', 'processing', 'in_progress', 'out_for_delivery'].includes(o.status?.toLowerCase())).length;
+  const completedOrdersCount = orders.filter(o => o.status === 'completed' || o.status === 'delivered').length;
+  const cancelledOrdersCount = orders.filter(o => o.status === 'cancelled' || o.status === 'canceled').length;
+
+  const handleCall = (phone: string) => {
+    if (!phone || phone === 'N/A') {
+      alert('Phone number not available');
+      return;
+    }
+    const cleanPhone = phone.replace(/\s/g, '');
+    window.open(`tel:${cleanPhone}`, '_self');
+  };
+
+  const checkIsDelayed = (order: Order): boolean => {
+    if (activeTab !== 'open') return false;
+    
+    const openStatuses = ['placed', 'pending', 'confirmed', 'processing', 'in_progress', 'out_for_delivery'];
+    if (!openStatuses.includes(order.status?.toLowerCase())) return false;
+
+    const getOrderDate = (date: any): Date | null => {
+      if (!date) return null;
+      try {
+        if (typeof date === 'string') return new Date(date);
+        if (date instanceof Date) return date;
+        if (typeof date === 'object' && 'toDate' in date) return date.toDate();
+        return null;
+      } catch { return null; }
+    };
+
+    const deliveryDate = getOrderDate(order.deliveryDate || order.createdAt);
+    if (!deliveryDate) return false;
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    // Check if order is from a previous day (Past due is always delayed)
+    const orderDay = new Date(deliveryDate.getFullYear(), deliveryDate.getMonth(), deliveryDate.getDate());
+    if (orderDay < today) return true;
+
+    // For today's orders, check the time slot
+    if (orderDay.getTime() === today.getTime()) {
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes();
+      const currentTimeInMinutes = currentHour * 60 + currentMinute;
+
+      const slot = order.deliverySlot?.toLowerCase() || '';
+      
+      if (slot.includes('morning') || slot.includes('11:00') || slot.includes('8:00')) {
+        // Morning slot ends at 1:30 PM (13:30)
+        return currentTimeInMinutes > (13 * 60 + 30);
+      }
+      if (slot.includes('afternoon') || slot.includes('2:30') || slot.includes('1:00')) {
+        // Afternoon slot ends at 4:30 PM (16:30)
+        return currentTimeInMinutes > (16 * 60 + 30);
+      }
+      if (slot.includes('evening') || slot.includes('6:00') || slot.includes('5:00')) {
+        // Evening slot ends at 9:30 PM (21:30) - Adjusted for production realism
+        return currentTimeInMinutes > (21 * 60 + 30);
+      }
+
+      // Default: If it's a "placed" order from today and it's already late night
+      return currentTimeInMinutes > (22 * 60 + 0); 
+    }
+
+    return false;
+  };
+
+  // Automatic Dispatch Effect - checks periodically for unassigned orders
+  useEffect(() => {
+    if (loading || armyMembers.length === 0) return;
+
+    const autoDispatchInterval = setInterval(async () => {
+      const unassignedToAssign = orders.filter(o => 
+        ['placed', 'pending'].includes(o.status?.toLowerCase()) && 
+        !o.assignedPartner && 
+        !o.autoAssignAttempted // Prevent infinite loops if assignment fails
       );
       
-      console.log('📂 Open orders sections:', {
-        dumDum: dumDumOrders.length,
-        saltLake: saltLakeOrders.length,
-        subscription: subscriptionOrders.length,
-        other: otherOrders.length
-      });
+      const onlineArmy = armyMembers.filter(m => m.isOnline);
       
-      return { dumDumOrders, saltLakeOrders, subscriptionOrders, otherOrders };
-    } else {
-      // For completed/cancelled: show all in single list
-      console.log('📂 Completed/Cancelled orders section:', {
-        allOrders: filteredOrders.length,
-        orders: filteredOrders.map(o => ({ id: o.id, status: o.status }))
-      });
-      
-      return {
-        allOrders: filteredOrders,
-        dumDumOrders: [],
-        saltLakeOrders: [],
-        subscriptionOrders: [],
-        otherOrders: []
-      };
-    }
-  };
-  
-  const { dumDumOrders, saltLakeOrders, subscriptionOrders, otherOrders, allOrders } = getOrdersBySection();
-  
-  // Get counts for tab badges
-  const openOrdersCount = orders.filter(o => o.status === 'pending' || o.status === 'processing').length;
-  const completedOrdersCount = orders.filter(o => o.status === 'completed').length;
-  const cancelledOrdersCount = orders.filter(o => o.status === 'cancelled').length;
-  
-  // Debug log for order counts
-  console.log('🔢 Order counts:', {
-    open: openOrdersCount,
-    completed: completedOrdersCount,
-    cancelled: cancelledOrdersCount,
-    total: orders.length
-  });
+      if (unassignedToAssign.length > 0 && onlineArmy.length > 0) {
+        console.log(`🤖 Auto-dispatching ${unassignedToAssign.length} orders...`);
+        for (let i = 0; i < unassignedToAssign.length; i++) {
+          const order = unassignedToAssign[i];
+          const partner = onlineArmy[i % onlineArmy.length];
+          try {
+            // Mark as attempted so we don't try every few seconds if it fails
+            order.autoAssignAttempted = true; 
+            
+            await updateDocument('orders', order.id, {
+              assignedPartner: partner.name,
+              deliveryPartner: { name: partner.name, phone: partner.phoneNumber },
+              status: 'processing',
+              updatedAt: new Date()
+            });
+            
+            console.log(`✅ Auto-assigned ${order.id} to ${partner.name}`);
+          } catch (err) {
+            console.error(`❌ Auto-assign failed for ${order.id}:`, err);
+          }
+        }
+      }
+    }, 60000); // Check every minute
 
-  const handleCall = (phone: string) => phone && window.open(`tel:${phone}`, '_self');
-  
+    return () => clearInterval(autoDispatchInterval);
+  }, [orders, armyMembers, loading]);
+
+
   const handleNavigation = (order: Order) => {
-    // Debug: Log all available address data for this specific order
-    console.log('🔍 DETAILED ADDRESS DEBUG:', {
-      orderId: order.id,
-      customerName: order.userName,
-      'order.address': order.address,
-      'order.address.full': order.address.full,
-      'order.address.street': order.address.street,
-      'order.address.city': order.address.city,
-      'order.address.pincode': order.address.pincode
-    });
-    
-    // Use the exact full address from Firebase, prioritizing the complete address string
     let destinationAddress = '';
-    
-    // First priority: Use the full address if available (this is the exact address saved by user)
     if (order.address.full && order.address.full.trim()) {
       destinationAddress = order.address.full.trim();
-      console.log('✅ Using FULL ADDRESS from Firebase:', destinationAddress);
+    } else if (order.address.street) {
+      destinationAddress = `${order.address.street}, ${order.address.city || ''} ${order.address.pincode || ''}`;
     }
-    // Fallback: Construct from parts only if full address is not available
-    else if (order.address.street && order.address.city && order.address.pincode) {
-      destinationAddress = `${order.address.street}, ${order.address.city} - ${order.address.pincode}`;
-      console.log('⚠️ Using CONSTRUCTED ADDRESS:', destinationAddress);
-    }
-    // Last resort: Use pincode only if no other address data is available
-    else if (order.address.pincode) {
-      destinationAddress = order.address.pincode;
-      console.log('⚠️ Using PINCODE ONLY:', destinationAddress);
-    }
-    else {
-      alert('❌ No valid address found for this order. Cannot navigate.');
-      console.error('❌ No address data available for order:', order);
-      return;
-    }
-    
-    // Additional validation - ensure we're not getting a transformed address
-    if (destinationAddress.includes('S Sinthee Rd') || destinationAddress.includes('Biswanath Colony')) {
-      console.error('❌ DETECTED TRANSFORMED ADDRESS! Original expected but got transformed:', destinationAddress);
-      alert('❌ Error: Address appears to be transformed. Please check the original data in Firebase.');
-      return;
-    }
-    
-    // Log the exact address being used for navigation
-    console.log('🗺️ Final navigation address:', {
-      orderId: order.id,
-      finalDestination: destinationAddress,
-      addressLength: destinationAddress.length
-    });
-    
-    // Validate address has meaningful content (not just pincode)
-    if (destinationAddress.length < 6) {
-      alert('❌ Address appears to be incomplete. Please check the order details.');
-      return;
-    }
-    
-    // Show confirmation to user before navigation
-    const confirmNavigation = confirm(`Navigate to this address?
 
-${destinationAddress}
-
-Click OK to open Google Maps with this exact address.`);
-    if (!confirmNavigation) {
+    if (!destinationAddress) {
+      alert('No address available.');
       return;
     }
-    
-    // Try to get user's current location and show route
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          console.log('📍 Current location:', { latitude, longitude });
-          console.log('🎯 Destination:', destinationAddress);
-          
-          // Open Google Maps with directions from current location to exact delivery address
-          const mapsUrl = `https://www.google.com/maps/dir/${latitude},${longitude}/${encodeURIComponent(destinationAddress)}`;
-          console.log('🗺️ Opening Maps URL:', mapsUrl);
-          window.open(mapsUrl, '_blank');
-        },
-        (error) => {
-          console.warn('⚠️ Geolocation failed:', error.message);
-          // Fallback: Open Google Maps with exact destination address only
-          const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destinationAddress)}`;
-          console.log('🗺️ Opening Maps URL (fallback):', mapsUrl);
-          window.open(mapsUrl, '_blank');
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 300000 // 5 minutes
-        }
-      );
-    } else {
-      // Fallback for browsers without geolocation support
-      console.log('🗺️ Geolocation not supported, opening destination only');
-      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destinationAddress)}`;
-      console.log('🗺️ Opening Maps URL (no geolocation):', mapsUrl);
-      window.open(mapsUrl, '_blank');
-    }
+
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destinationAddress)}`;
+    window.open(mapsUrl, '_blank');
   };
 
   const handleDeliveryClick = (order: Order) => {
@@ -713,71 +748,32 @@ Click OK to open Google Maps with this exact address.`);
   };
 
   const testFirebaseConnection = async () => {
-    console.log('🧪 Testing Firebase connection...');
     try {
-      console.log('Firebase config check:', {
-        hasDB: !!db,
-        apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ? 'SET' : 'MISSING',
-        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'MISSING'
+      const snapshot = await getDocs(collection(db, 'orders'));
+      alert(`Found ${snapshot.docs.length} orders.`);
+    } catch (err) {
+      alert(`Connection failed: ${err}`);
+    }
+  };
+
+  const handleReceivePayment = (order: Order) => {
+    setSelectedQRCodeOrder(order);
+    setShowQRModal(true);
+  };
+
+  const handlePartnerChange = async (orderId: string, partnerKey: string) => {
+    try {
+      const partner = armyMembers.find(m => m.name === partnerKey);
+      if (!partner) return;
+      await updateDocument('orders', orderId, {
+        assignedPartner: partnerKey,
+        deliveryPartner: { name: partner.name, phone: partner.phoneNumber },
+        status: 'processing',
+        updatedAt: new Date()
       });
-      
-      const ordersRef = collection(db, 'orders');
-      const snapshot = await getDocs(ordersRef);
-      
-      console.log('✅ Firebase connection test results:', {
-        totalDocs: snapshot.docs.length,
-        isEmpty: snapshot.empty
-      });
-      
-      // Show first 3 orders to understand data structure
-      const sampleOrders = snapshot.docs.slice(0, 3).map(doc => ({
-        id: doc.id,
-        data: doc.data()
-      }));
-      
-      console.log('📋 Sample order documents:', sampleOrders);
-      
-      // Analyze order statuses
-      const orderStatuses = snapshot.docs.map(doc => doc.data().status || 'pending');
-      const statusCounts: Record<string, number> = {};
-      orderStatuses.forEach(status => {
-        statusCounts[status] = (statusCounts[status] || 0) + 1;
-      });
-      
-      console.log('📊 Order status distribution:', statusCounts);
-      
-      // Check for different possible field names
-      const firstOrder = snapshot.docs[0]?.data();
-      if (firstOrder) {
-        console.log('🔍 First order field analysis:', {
-          hasStatus: 'status' in firstOrder,
-          hasUserId: 'userId' in firstOrder,
-          hasCustomerId: 'customerId' in firstOrder,
-          hasUserName: 'userName' in firstOrder,
-          hasCustomerName: 'customerName' in firstOrder,
-          hasPhone: 'userPhone' in firstOrder,
-          hasPhoneNumber: 'phoneNumber' in firstOrder,
-          hasAddress: 'address' in firstOrder,
-          hasDeliveryAddress: 'deliveryAddress' in firstOrder,
-          hasPincode: 'pincode' in firstOrder,
-          hasQuantity: 'quantity' in firstOrder,
-          hasAmount: 'amount' in firstOrder,
-          hasCreatedAt: 'createdAt' in firstOrder,
-          hasOrderType: 'orderType' in firstOrder,
-          hasSubscriptionId: 'subscriptionId' in firstOrder,
-          allFields: Object.keys(firstOrder)
-        });
-      }
-      
-      // Show all unique statuses found in the database
-      const uniqueStatuses = [...new Set(orderStatuses)];
-      console.log('🏷️ Unique order statuses in database:', uniqueStatuses);
-      
-      alert(`Firebase test: Found ${snapshot.docs.length} orders in database
-Statuses: ${Object.entries(statusCounts).map(([status, count]) => `${status}(${count})`).join(', ')}`);
-    } catch (error) {
-      console.error('❌ Firebase connection test failed:', error);
-      alert(`Firebase connection failed: ${error}`);
+      alert(`Assigned ${partnerKey} successfully.`);
+    } catch (err) {
+      alert('Failed to assign partner.');
     }
   };
 
@@ -785,131 +781,330 @@ Statuses: ${Object.entries(statusCounts).map(([status, count]) => `${status}(${c
     if (!selectedOrder) return;
     setProcessing(true);
     try {
-      // Try multiple user lookup strategies
       const user = getUserDetails(selectedOrder.userId);
       
-      if (!user) {
-        console.warn('User not found with userId:', selectedOrder.userId);
-        console.log('Available users:', users.map(u => ({ id: u.id, customerId: u.customerId, name: u.name })));
-        console.log('Order details:', selectedOrder);
-        
-        // If no user found, we can still process the order but without user updates
-        console.log('Proceeding with order update only (no user wallet/jar updates)');
-      }
-
-      let walletChange = 0;
-      let holdJarsChange = 0;
-
-      // Always deduct the order amount from wallet when order is completed
-      walletChange = -(selectedOrder.quantity * 37);
+      // LOGIC: If Cash and NOT received, deduct from wallet (debt). 
+      // If Wallet/UPI or Paid Cash, no deduction needed as it's already accounted for or collected.
+      const isUnpaidCash = selectedOrder.paymentMethod === 'cash' && !delivery.paymentReceived;
+      const walletChange = isUnpaidCash ? -(selectedOrder.quantity * 37) : 0;
       
-      // If jar is not returned, add to hold jars
-      if (!delivery.jarReturned) {
-        holdJarsChange = selectedOrder.quantity;
-      }
-      
-      // If payment is received, no additional changes needed
-      // If payment is not received, wallet balance will be negative (already deducted above)
+      const holdJarsChange = delivery.jarReturned ? 0 : selectedOrder.quantity;
 
       await updateDocument('orders', selectedOrder.id, {
         status: 'completed',
         deliveredAt: new Date(),
+        updatedAt: new Date(),
         deliveryNotes: delivery.notes,
         jarReturned: delivery.jarReturned,
         paymentReceived: delivery.paymentReceived
       });
 
-      if ((walletChange !== 0 || holdJarsChange !== 0) && user) {
-        const updates: any = { updatedAt: new Date() };
-        if (walletChange !== 0) updates.wallet_balance = user.wallet_balance + walletChange; // Use wallet_balance for user app compatibility
-        if (holdJarsChange !== 0) updates.jars_occupied = user.jars_occupied + holdJarsChange; // Use jars_occupied for user app compatibility
-        await updateDocument('users', user.id, updates);
-        console.log('User data updated successfully:', updates);
-      } else if (walletChange !== 0 || holdJarsChange !== 0) {
-        console.warn('Cannot update user data - user not found. Order marked as delivered only.');
+      if (user) {
+        await updateDocument('users', user.id, {
+          wallet_balance: user.wallet_balance + walletChange,
+          jars_occupied: user.jars_occupied + holdJarsChange,
+          updatedAt: new Date()
+        });
       }
 
+      await logActivity({
+        action: 'ORDER_DELIVERED',
+        actor: 'ADMIN',
+        actorName: 'Admin',
+        actorId: 'admin_panel',
+        details: `Order marked as delivered. Payment: ${delivery.paymentReceived ? 'Received' : 'Not Received'}`,
+        targetId: selectedOrder.id,
+      });
+
       setShowModal(false);
-    } catch (error) {
-      console.error('Error:', error);
+    } catch (err) {
       alert('Error updating order.');
     } finally {
       setProcessing(false);
     }
   };
 
-  const renderOrderCard = (order: Order) => {
-    // Debug log for order rendering
-    console.log('📄 Rendering order card:', {
-      orderId: order.id,
-      status: order.status,
-      type: order.orderType,
-      amount: order.amount,
-      tab: activeTab
-    });
-    
-    const user = getUserDetails(order.userId);
-    const name = order.userName || user?.name || 'Unknown Customer';
-    const phone = order.userPhone || user?.phoneNumber || 'N/A';
-    
-    // Debug log for missing users
-    if (!user && order.userId) {
-      console.log('User not found for order:', {
-        orderId: order.id,
-        orderUserId: order.userId,
-        orderUserName: order.userName,
-        orderUserPhone: order.userPhone
+  const handleBulkAssign = async (targetOrders: Order[]) => {
+    if (!bulkPartner) { alert('Please select a partner'); return; }
+    if (targetOrders.length === 0) { alert('No orders'); return; }
+    if (!confirm(`Assign ${bulkPartner} to ${targetOrders.length} orders?`)) return;
+
+    setIsBulkAssigning(true);
+    let successCount = 0;
+    try {
+      for (const order of targetOrders) {
+        try {
+          await updateDocument('orders', order.id, {
+            assignedPartner: bulkPartner,
+            status: 'processing',
+            updatedAt: new Date()
+          });
+          successCount++;
+        } catch (err) { console.error(err); }
+      }
+      alert(`Assigned ${successCount} orders.`);
+      await logActivity({
+        action: 'BULK_PARTNER_ASSIGNMENT',
+        actor: 'ADMIN',
+        actorName: 'Admin',
+        actorId: 'admin_panel',
+        details: `Bulk assigned ${successCount} orders to ${bulkPartner}`,
+        targetId: 'multiple_orders',
       });
+    } finally {
+      setIsBulkAssigning(false);
+      setBulkPartner('');
     }
-    
+  };
+
+  const handleCancelOrder = async (orderId: string) => {
+    if (!confirm('Are you sure you want to cancel this order?')) return;
+    try {
+      await updateDocument('orders', orderId, {
+        status: 'cancelled',
+        updatedAt: new Date()
+      });
+      await logActivity({
+        action: 'ORDER_CANCELLED',
+        actor: 'ADMIN',
+        actorName: 'Admin',
+        actorId: 'admin_panel',
+        details: `Order ${orderId} cancelled by admin`,
+        targetId: orderId,
+      });
+      alert('Order cancelled successfully.');
+    } catch (err) {
+      alert('Failed to cancel order.');
+    }
+  };
+
+  const handleAutoAssign = async () => {
+    const unassignedOrders = orders.filter(o => 
+      ['placed', 'pending'].includes(o.status?.toLowerCase()) && !o.assignedPartner
+    );
+    const onlineArmy = armyMembers.filter(m => m.isOnline);
+
+    if (unassignedOrders.length === 0) {
+      alert('No unassigned orders found.');
+      return;
+    }
+    if (onlineArmy.length === 0) {
+      alert('No online army members available.');
+      return;
+    }
+
+    if (!confirm(`Auto-assign ${unassignedOrders.length} orders to ${onlineArmy.length} online members?`)) return;
+
+    setIsBulkAssigning(true);
+    let successCount = 0;
+    try {
+      // Simple Round-Robin
+      for (let i = 0; i < unassignedOrders.length; i++) {
+        const order = unassignedOrders[i];
+        const partner = onlineArmy[i % onlineArmy.length];
+        try {
+          await updateDocument('orders', order.id, {
+            assignedPartner: partner.name,
+            deliveryPartner: { name: partner.name, phone: partner.phoneNumber },
+            status: 'processing',
+            updatedAt: new Date()
+          });
+          successCount++;
+        } catch (err) { console.error(err); }
+      }
+      alert(`Successfully auto-assigned ${successCount} orders.`);
+      await logActivity({
+        action: 'AUTO_DISPATCH_TRIGGERED',
+        actor: 'ADMIN',
+        actorName: 'Admin',
+        actorId: 'admin_panel',
+        details: `Auto-dispatched ${successCount} orders.`,
+        targetId: 'multiple_orders',
+      });
+    } finally {
+      setIsBulkAssigning(false);
+    }
+  };
+
+  const renderOrderCard = (order: Order) => {
+    const user = getUserDetails(order.userId);
+    const name = user?.name || order.userName || 'Unknown Customer';
+    const phone = user?.phoneNumber || order.userPhone || 'N/A';
+    const isDelayed = checkIsDelayed(order);
+
+    const getPaymentBadge = (method: string) => {
+      const m = method?.toLowerCase() || 'cash';
+      if (m === 'wallet') return { 
+        icon: '💳', 
+        color: '#ffffff', 
+        label: 'WALLET', 
+        bg: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+        shadow: '0 4px 12px rgba(99, 102, 241, 0.3)'
+      };
+      if (m === 'upi') return { 
+        icon: '📲', 
+        color: '#ffffff', 
+        label: 'UPI / PAID', 
+        bg: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+        shadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+      };
+      return { 
+        icon: '💵', 
+        color: '#ffffff', 
+        label: 'CASH', 
+        bg: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+        shadow: '0 4px 12px rgba(245, 158, 11, 0.3)'
+      };
+    };
+
+    const payment = getPaymentBadge(order.paymentMethod || 'cash');
+
     return (
-      <OrderCard key={order.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+      <OrderCard 
+        key={order.id} 
+        initial={{ opacity: 0, y: 20 }} 
+        animate={{ opacity: 1, y: 0 }}
+        style={isDelayed ? { 
+          border: '2px solid #ef4444', 
+          background: 'linear-gradient(to right, #fffcfc, #ffffff)',
+          boxShadow: '0 10px 30px rgba(239, 68, 68, 0.15)'
+        } : {}}
+      >
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          {order.isPriority && (
+            <div style={{ 
+              background: '#ef4444', color: 'white', padding: '4px 12px', borderRadius: '20px', 
+              fontSize: '0.75rem', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px',
+              boxShadow: '0 2px 4px rgba(239, 68, 68, 0.3)'
+            }}>
+              🚀 FAST DELIVERY
+            </div>
+          )}
+          {isDelayed && (
+            <div style={{ 
+              background: '#ef4444', color: 'white', padding: '4px 12px', borderRadius: '20px', 
+              fontSize: '0.75rem', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px',
+              boxShadow: '0 2px 4px rgba(239, 68, 68, 0.3)', display: 'flex', alignItems: 'center', gap: '4px'
+            }}>
+              ⚠️ DELAYED
+            </div>
+          )}
+        </div>
+        
         <OrderHeader>
           <OrderInfo>
             <OrderCustomer>
               <FiUser size={16} />
               {name}
-              {!user && order.userId && (
-                <span style={{
-                  background: '#fbbf24',
-                  color: '#92400e',
-                  fontSize: '0.7rem',
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  fontWeight: '600',
-                  marginLeft: '8px'
-                }}>
-                  USER NOT FOUND
-                </span>
-              )}
             </OrderCustomer>
             <OrderDetails>
-              <div><FiPhone size={14} style={{ marginRight: '6px' }} />{phone}</div>
-              <div><FiMapPin size={14} style={{ marginRight: '6px' }} />
-                {order.address.full || `${order.address.street}, ${order.address.city} - ${order.address.pincode}`}
+              <div style={{ fontSize: '1.1rem', fontWeight: '800', color: '#1e293b', display: 'flex', alignItems: 'center' }}>
+                <FiPhone size={16} style={{ marginRight: '8px', color: '#6366f1' }} />
+                <a href={`tel:${phone}`} style={{ color: 'inherit', textDecoration: 'none' }}>{phone}</a>
               </div>
-              <div><FiClock size={14} style={{ marginRight: '6px' }} />{formatDate(order.createdAt)}</div>
-              {order.orderType === 'subscription' && <div>🔄 Subscription Order</div>}
-              <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '4px' }}>Pincode: {order.address.pincode}</div>
+              
+              <div style={{ wordBreak: 'break-word', marginTop: '8px', fontSize: '0.9rem', color: '#475569' }}>
+                <FiMapPin size={14} style={{ marginRight: '6px' }} />
+                {order.address.full || `${order.address.street}, ${order.address.pincode}`}
+              </div>
+
+              {order.plusCode && (
+                <div style={{ marginTop: '6px' }}>
+                  <FiNavigation size={14} style={{ marginRight: '6px', color: '#3b82f6' }} />
+                  <a 
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.plusCode)}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    style={{ color: '#3b82f6', fontWeight: '600', textDecoration: 'none', borderBottom: '1px dashed #3b82f6', fontSize: '0.85rem' }}
+                  >
+                    Google Maps Link
+                  </a>
+                </div>
+              )}
+
+              <div style={{ 
+                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', 
+                marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '10px',
+                fontSize: '0.8rem', border: '1px solid #e2e8f0'
+              }}>
+                <div style={{ color: '#64748b' }}>🏢 Floor: <span style={{ color: '#0f172a', fontWeight: '700' }}>{order.floorNumber || 'N/A'}</span></div>
+                <div style={{ color: '#64748b' }}>🛗 Lift: <span style={{ color: '#0f172a', fontWeight: '700' }}>{order.hasLift ? '✅ Yes' : '❌ No'}</span></div>
+                <div style={{ color: '#64748b' }}>📍 Verified: <span style={{ color: order.isAddressVerified ? '#10b981' : '#f59e0b', fontWeight: '700' }}>{order.isAddressVerified ? '✅ Yes' : '⏳ Pending'}</span></div>
+                <div style={{ color: '#64748b' }}>🐕 Dogs: <span style={{ color: order.bewareOfDogs ? '#ef4444' : '#10b981', fontWeight: '700' }}>{order.bewareOfDogs ? '⚠️ YES' : '✅ No'}</span></div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '15px', alignItems: 'center' }}>
+                <div style={{ 
+                  padding: '8px 16px', borderRadius: '10px', fontSize: '0.9rem', fontWeight: '900',
+                  background: payment.bg, color: payment.color, boxShadow: payment.shadow,
+                  display: 'flex', alignItems: 'center', gap: '8px', border: 'none',
+                  letterSpacing: '0.5px'
+                }}>
+                  <span style={{ fontSize: '1.3rem' }}>{payment.icon}</span> {payment.label}
+                </div>
+                {order.deliverySlot && (
+                  <div style={{ 
+                    padding: '6px 12px', borderRadius: '8px', background: '#f1f5f9', color: '#475569', 
+                    fontSize: '0.75rem', fontWeight: '750', border: '1px solid #e2e8f0',
+                    display: 'flex', alignItems: 'center', gap: '4px'
+                  }}>
+                    ⏰ {order.deliverySlot}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ color: '#94a3b8', fontSize: '0.7rem', marginTop: '12px', fontWeight: '600' }}>
+                ID: {order.id} | Placed: {formatDate(order.createdAt)}
+              </div>
             </OrderDetails>
           </OrderInfo>
-          <div style={{ textAlign: 'right' }}>
-            <OrderStatus status={order.status}>{order.status}</OrderStatus>
-            <div style={{ margin: '8px 0', fontSize: '1.1rem', fontWeight: '700', color: '#10b981' }}>₹{order.amount}</div>
-            <div style={{ fontSize: '0.9rem', color: '#666' }}>Qty: {order.quantity}</div>
+
+          <div style={{ textAlign: 'right', minWidth: '110px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div>
+              <OrderStatus status={order.status}>{order.status}</OrderStatus>
+              <div style={{ margin: '8px 0', fontSize: '1.5rem', fontWeight: '900', color: '#10b981' }}>₹{order.amount}</div>
+              <div style={{ fontSize: '0.9rem', color: '#64748b', fontWeight: '700' }}>Qty: {order.quantity}</div>
+            </div>
+            
+            <div style={{ marginTop: 'auto' }}>
+              <div style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: '900', marginBottom: '4px', textAlign: 'left', textTransform: 'uppercase' }}>Assign Army</div>
+              <PartnerSelect
+                value={order.assignedPartner || ''}
+                onChange={(e) => handlePartnerChange(order.id, e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                style={{ width: '100%', padding: '8px', borderRadius: '8px' }}
+              >
+                <option value="">Select...</option>
+                {armyMembers.map(m => (
+                  <option key={m.id} value={m.name}>
+                    {m.name} {m.isOnline ? '🟢' : '🔴'}
+                  </option>
+                ))}
+              </PartnerSelect>
+            </div>
           </div>
         </OrderHeader>
-        
-        <OrderActions>
-          <ActionBtn variant="call" onClick={() => handleCall(phone)} disabled={phone === 'N/A'}>
-            <FiPhone size={14} />Call
+
+        <OrderActions style={{ marginTop: '20px', gap: '8px' }}>
+          <ActionBtn variant="navigate" onClick={() => handleCall(phone)} style={{ background: '#10b981' }}>
+            <FiPhone size={14} /> Call
           </ActionBtn>
-          <ActionBtn variant="navigate" onClick={() => handleNavigation(order)} title="Get directions from current location">
-            <FiNavigation size={14} />Get Route
+          <ActionBtn variant="navigate" onClick={() => handleNavigation(order)}>
+            <FiNavigation size={14} /> Route
           </ActionBtn>
+          {(!order.paymentMethod || order.paymentMethod.toLowerCase() === 'cash') && (
+            <ActionBtn variant="navigate" onClick={() => handleReceivePayment(order)} style={{ background: '#f59e0b', color: 'white' }}>
+              <FiDollarSign size={14} /> Receive Pay
+            </ActionBtn>
+          )}
           <ActionBtn variant="deliver" onClick={() => handleDeliveryClick(order)}>
-            <FiCheckCircle size={14} />Complete Order
+            <FiCheckCircle size={14} /> Deliver
           </ActionBtn>
+          {(order.status !== 'completed' && order.status !== 'delivered' && order.status !== 'cancelled' && order.status !== 'canceled') && (
+            <ActionBtn onClick={() => handleCancelOrder(order.id)} style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca' }}>
+              <FiX size={14} /> Cancel
+            </ActionBtn>
+          )}
         </OrderActions>
       </OrderCard>
     );
@@ -923,13 +1118,8 @@ Statuses: ${Object.entries(statusCounts).map(([status, count]) => `${status}(${c
     <Container>
       <Header>
         <TitleSection>
-          <OrdersLogo 
-            src="/logo.jpeg" 
-            alt="Hydrant Logo"
-            width={45}
-            height={45}
-          />
-          <Title><FiPackage />Orders Management</Title>
+          <OrdersLogo src="/logo.jpeg" alt="Logo" width={45} height={45} />
+          <Title><FiPackage />Orders</Title>
         </TitleSection>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <SearchBox>
@@ -940,171 +1130,82 @@ Statuses: ${Object.entries(statusCounts).map(([status, count]) => `${status}(${c
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </SearchBox>
-          <ActionButton variant="primary" onClick={() => triggerSubscriptionOrders()}>
-            <FiRefreshCw />Generate Subscription Orders
-          </ActionButton>
-          <ActionButton onClick={testFirebaseConnection}>
-            <FiInfo />Test Firebase Connection
-          </ActionButton>
-          <ActionButton onClick={() => window.location.reload()}>
-            <FiRefreshCw />Refresh Page
-          </ActionButton>
-          <ActionButton onClick={() => window.open('/admin/test-orders', '_blank')}>
-            <FiInfo />Debug Orders
-          </ActionButton>
+          <ActionButton onClick={() => window.location.reload()}><FiRefreshCw />Refresh</ActionButton>
         </div>
       </Header>
 
-      <div style={{ background: '#e0f2fe', border: '1px solid #0891b2', color: '#0c4a6e', padding: '15px', borderRadius: '10px', marginBottom: '20px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-        <FiInfo />
-        <div>
-          <strong>Smart Order Management:</strong> Orders organized by status and delivery areas, sorted by time (oldest first).
-          <br />• <strong>Open Orders:</strong> {openOrdersCount} pending/processing orders across all areas
-          <br />• <strong>Completed Orders:</strong> {completedOrdersCount} successfully completed orders
-          <br />• <strong>Cancelled Orders:</strong> {cancelledOrdersCount} cancelled orders
-          {activeTab === 'open' && (
-            <>
-              <br />• <strong>700030 (Dum Dum):</strong> {dumDumOrders?.length || 0} pending orders
-              <br />• <strong>700074 (Salt Lake City):</strong> {saltLakeOrders?.length || 0} pending orders  
-              <br />• <strong>Subscription Orders:</strong> {subscriptionOrders?.length || 0} auto-generated orders
-              <br />• <strong>Other Areas:</strong> {otherOrders?.length || 0} orders from different locations
-            </>
-          )}
-        </div>
-      </div>
-
       <TabContainer>
-        <Tab 
-          $active={activeTab === 'open'} 
-          onClick={() => setActiveTab('open')}
-        >
-          📦 Open Orders
-          {activeTab === 'open' ? (
-            <TabBadge>{openOrdersCount}</TabBadge>
-          ) : (
-            <InactiveTabBadge>{openOrdersCount}</InactiveTabBadge>
-          )}
+        <Tab $active={activeTab === 'open'} onClick={() => setActiveTab('open')}>
+          📦 Open <TabBadge>{openOrdersCount}</TabBadge>
         </Tab>
-        <Tab 
-          $active={activeTab === 'completed'} 
-          onClick={() => setActiveTab('completed')}
-        >
-          ✅ Completed Orders
-          {activeTab === 'completed' ? (
-            <TabBadge>{completedOrdersCount}</TabBadge>
-          ) : (
-            <InactiveTabBadge>{completedOrdersCount}</InactiveTabBadge>
-          )}
+        <Tab $active={activeTab === 'completed'} onClick={() => setActiveTab('completed')}>
+          ✅ Done <TabBadge>{completedOrdersCount}</TabBadge>
         </Tab>
-        <Tab 
-          $active={activeTab === 'cancelled'} 
-          onClick={() => setActiveTab('cancelled')}
-        >
-          ❌ Cancelled Orders
-          {activeTab === 'cancelled' ? (
-            <TabBadge>{cancelledOrdersCount}</TabBadge>
-          ) : (
-            <InactiveTabBadge>{cancelledOrdersCount}</InactiveTabBadge>
-          )}
+        <Tab $active={activeTab === 'cancelled'} onClick={() => setActiveTab('cancelled')}>
+          ❌ X <TabBadge>{cancelledOrdersCount}</TabBadge>
         </Tab>
       </TabContainer>
 
       {activeTab === 'open' ? (
-        // Open Orders: Show organized by pincode sections
-        <SectionsGrid>
-          <OrderSection type="dum-dum">
-            <SectionHeader>
-              <SectionTitle type="dum-dum"><FiMapPin />700030 - Dum Dum</SectionTitle>
-              <div style={{ color: '#666', fontSize: '0.9rem' }}>{dumDumOrders?.length || 0} pending orders</div>
-            </SectionHeader>
-            <OrdersList>
-              {dumDumOrders && dumDumOrders.length > 0 ? dumDumOrders.map(renderOrderCard) : 
-                <EmptyState><FiPackage size={24} /><div>No orders in this area</div></EmptyState>}
-            </OrdersList>
-          </OrderSection>
-
-          <OrderSection type="salt-lake">
-            <SectionHeader>
-              <SectionTitle type="salt-lake"><FiMapPin />700074 - Salt Lake City</SectionTitle>
-              <div style={{ color: '#666', fontSize: '0.9rem' }}>{saltLakeOrders?.length || 0} pending orders</div>
-            </SectionHeader>
-            <OrdersList>
-              {saltLakeOrders && saltLakeOrders.length > 0 ? saltLakeOrders.map(renderOrderCard) : 
-                <EmptyState><FiPackage size={24} /><div>No orders in this area</div></EmptyState>}
-            </OrdersList>
-          </OrderSection>
-
-          <OrderSection type="subscription">
-            <SectionHeader>
-              <SectionTitle type="subscription"><FiRefreshCw />Subscription Orders</SectionTitle>
-              <div style={{ color: '#666', fontSize: '0.9rem' }}>{subscriptionOrders?.length || 0} auto-generated</div>
-            </SectionHeader>
-            <OrdersList>
-              {subscriptionOrders && subscriptionOrders.length > 0 ? subscriptionOrders.map(renderOrderCard) : 
-                <EmptyState><FiRefreshCw size={24} /><div>No subscription orders</div></EmptyState>}
-            </OrdersList>
-          </OrderSection>
-
-          <OrderSection type="others">
-            <SectionHeader>
-              <SectionTitle type="others"><FiPackage />Other Areas</SectionTitle>
-              <div style={{ color: '#666', fontSize: '0.9rem' }}>{otherOrders?.length || 0} orders from various locations</div>
-            </SectionHeader>
-            <OrdersList>
-              {otherOrders && otherOrders.length > 0 ? otherOrders.map(renderOrderCard) : 
-                <EmptyState><FiPackage size={24} /><div>No orders from other areas</div></EmptyState>}
-            </OrdersList>
-          </OrderSection>
-        </SectionsGrid>
+        <>
+          <BulkAssignBar>
+            <BulkAssignTitle><FiPackage /> Bulk Assign {filteredOrders.length} Orders</BulkAssignTitle>
+            <BulkAssignActions>
+              <PartnerSelect value={bulkPartner} onChange={(e) => setBulkPartner(e.target.value)}>
+                <option value="">Select Army...</option>
+                {armyMembers.map(m => (
+                  <option key={m.id} value={m.name}>
+                    {m.name} {m.isOnline ? '🟢' : '🔴'}
+                  </option>
+                ))}
+              </PartnerSelect>
+              <ActionButton variant="primary" onClick={() => handleBulkAssign(filteredOrders)} disabled={isBulkAssigning || !bulkPartner}>
+                Apply
+              </ActionButton>
+              <ActionButton 
+                variant="secondary" 
+                onClick={handleAutoAssign} 
+                disabled={isBulkAssigning}
+                style={{ background: '#f8fafc', color: '#8e2de2', border: '1px solid #e2e8f0', fontWeight: 'bold' }}
+              >
+                <FiRefreshCw style={{ marginRight: '6px' }} /> Auto-Dispatch
+              </ActionButton>
+            </BulkAssignActions>
+          </BulkAssignBar>
+          <SectionsGrid>
+            <OrderSection type="others" style={{ borderTop: '4px solid #3b82f6' }}>
+              <SectionHeader><SectionTitle type="others"><FiClock /> Today - Morning</SectionTitle></SectionHeader>
+              <OrdersList>{todayMorning && todayMorning.length > 0 ? todayMorning.map(renderOrderCard) : <EmptyState>No morning orders</EmptyState>}</OrdersList>
+            </OrderSection>
+            <OrderSection type="others" style={{ borderTop: '4px solid #f59e0b' }}>
+              <SectionHeader><SectionTitle type="others"><FiClock /> Today - Afternoon</SectionTitle></SectionHeader>
+              <OrdersList>{todayAfternoon && todayAfternoon.length > 0 ? todayAfternoon.map(renderOrderCard) : <EmptyState>No afternoon orders</EmptyState>}</OrdersList>
+            </OrderSection>
+            <OrderSection type="others" style={{ borderTop: '4px solid #8b5cf6' }}>
+              <SectionHeader><SectionTitle type="others"><FiClock /> Today - Evening</SectionTitle></SectionHeader>
+              <OrdersList>{todayEvening && todayEvening.length > 0 ? todayEvening.map(renderOrderCard) : <EmptyState>No evening orders</EmptyState>}</OrdersList>
+            </OrderSection>
+            <OrderSection type="others" style={{ borderTop: '4px solid #10b981' }}>
+              <SectionHeader><SectionTitle type="others"><FiClock /> Today - Others</SectionTitle></SectionHeader>
+              <OrdersList>{todayOther && todayOther.length > 0 ? todayOther.map(renderOrderCard) : <EmptyState>No other today orders</EmptyState>}</OrdersList>
+            </OrderSection>
+            <OrderSection type="others" style={{ borderTop: '4px solid #6366f1' }}>
+              <SectionHeader><SectionTitle type="others"><FiClock /> Tomorrow</SectionTitle></SectionHeader>
+              <OrdersList>{tomorrowOrders && tomorrowOrders.length > 0 ? tomorrowOrders.map(renderOrderCard) : <EmptyState>No tomorrow orders</EmptyState>}</OrdersList>
+            </OrderSection>
+            <OrderSection type="others" style={{ borderTop: '4px solid #94a3b8' }}>
+              <SectionHeader><SectionTitle type="others"><FiClock /> Future</SectionTitle></SectionHeader>
+              <OrdersList>{futureOrders && futureOrders.length > 0 ? futureOrders.map(renderOrderCard) : <EmptyState>No future orders</EmptyState>}</OrdersList>
+            </OrderSection>
+          </SectionsGrid>
+        </>
       ) : (
-        // Completed/Cancelled Orders: Show single list
-        <div style={{ 
-          background: 'white', 
-          borderRadius: '16px', 
-          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.08)',
-          border: '1px solid #f0f0f0',
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            padding: '20px 25px 15px 25px', 
-            borderBottom: '1px solid #f0f0f0',
-            background: activeTab === 'completed' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 
-                        'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-            color: 'white'
-          }}>
-            <h2 style={{ margin: '0 0 8px 0', fontSize: '1.3rem', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '12px' }}>
-              {activeTab === 'completed' ? (
-                <><FiCheckCircle />Completed Orders</>
-              ) : (
-                <><FiX />Cancelled Orders</>
-              )}
-            </h2>
-            <div style={{ fontSize: '0.9rem', opacity: '0.9' }}>
-              {allOrders?.length || 0} {activeTab} orders
-            </div>
+        <div style={{ background: 'white', borderRadius: '16px', border: '1px solid #f0f0f0', overflow: 'hidden' }}>
+          <div style={{ padding: '20px', background: activeTab === 'completed' ? '#10b981' : '#ef4444', color: 'white' }}>
+            <h2 style={{ margin: 0 }}>{activeTab === 'completed' ? 'Completed' : 'Cancelled'} Orders</h2>
           </div>
           <div style={{ maxHeight: '600px', overflowY: 'auto', padding: '10px' }}>
-            {allOrders && allOrders.length > 0 ? (
-              <>
-                <div style={{ marginBottom: '10px', fontSize: '0.9rem', color: '#666' }}>
-                  Showing {allOrders.length} {activeTab} orders
-                </div>
-                {allOrders.map(renderOrderCard)}
-              </>
-            ) : (
-              <EmptyState>
-                {activeTab === 'completed' ? (
-                  <><FiCheckCircle size={24} /><div>No completed orders found</div></>
-                ) : (
-                  <><FiX size={24} /><div>No cancelled orders found</div></>
-                )}
-                <div style={{ marginTop: '10px', fontSize: '0.9rem' }}>
-                  {activeTab === 'completed' 
-                    ? 'Completed orders will appear here after delivery confirmation' 
-                    : 'Cancelled orders will appear here when customers cancel their orders'}
-                </div>
-              </EmptyState>
-            )}
+            {allOrders && allOrders.length > 0 ? allOrders.map(renderOrderCard) : <EmptyState>No orders found</EmptyState>}
           </div>
         </div>
       )}
@@ -1114,104 +1215,63 @@ Statuses: ${Object.entries(statusCounts).map(([status, count]) => `${status}(${c
           <Modal initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <ModalContent initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}>
               <CloseBtn onClick={() => setShowModal(false)}><FiX /></CloseBtn>
-              <ModalHeader>
-                <ModalTitle><FiCheckCircle />Mark Order as Completed</ModalTitle>
-              </ModalHeader>
+              <ModalHeader><ModalTitle>Complete Delivery</ModalTitle></ModalHeader>
               <ModalBody>
-                <div style={{ marginBottom: '20px', padding: '15px', background: '#f9fafb', borderRadius: '8px' }}>
-                  <strong>Order Details:</strong><br />
-                  Customer: {selectedOrder.userName || 'Unknown'}<br />
-                  Quantity: {selectedOrder.quantity} jars<br />
-                  Amount: ₹{selectedOrder.amount}
-                </div>
-
+                <div style={{ marginBottom: '15px' }}>Order #{selectedOrder.id} - {selectedOrder.userName}</div>
                 <CheckboxGroup>
-                  <Checkbox 
-                    type="checkbox" 
-                    checked={delivery.jarReturned}
-                    onChange={(e) => setDelivery(prev => ({ ...prev, jarReturned: e.target.checked }))}
-                  />
-                  <Label>Jar returned by customer</Label>
+                  <Checkbox type="checkbox" checked={delivery.jarReturned} onChange={(e) => setDelivery(p => ({ ...p, jarReturned: e.target.checked }))} />
+                  <Label>Jar Returned</Label>
                 </CheckboxGroup>
-
                 <CheckboxGroup>
-                  <Checkbox 
-                    type="checkbox" 
-                    checked={delivery.paymentReceived}
-                    onChange={(e) => setDelivery(prev => ({ ...prev, paymentReceived: e.target.checked }))}
-                  />
-                  <Label>Payment received from customer</Label>
+                  <Checkbox type="checkbox" checked={delivery.paymentReceived} onChange={(e) => setDelivery(p => ({ ...p, paymentReceived: e.target.checked }))} />
+                  <Label>Payment Received</Label>
                 </CheckboxGroup>
-
-                {/* Payment QR Code - shown when payment is not yet received */}
-                {!delivery.paymentReceived && (
-                  <div style={{ 
-                    marginTop: '20px', 
-                    padding: '15px', 
-                    background: '#f0f9ff', 
-                    borderRadius: '8px', 
-                    border: '1px solid #bae6fd',
-                    textAlign: 'center'
-                  }}>
-                    <h4 style={{ margin: '0 0 10px 0', color: '#0369a1' }}>
-                      <FiDollarSign style={{ marginRight: '8px' }} />
-                      Payment QR Code
-                    </h4>
-                    <p style={{ fontSize: '0.9rem', color: '#334155', marginBottom: '15px' }}>
-                      Scan this QR code to receive payment from customer
-                    </p>
-                    <Image 
-                      src="/paymentcode.png" 
-                      alt="Payment QR Code" 
-                      width={150} 
-                      height={150}
-                      style={{ 
-                        borderRadius: '8px', 
-                        border: '1px solid #cbd5e1',
-                        margin: '0 auto'
-                      }}
-                    />
-                    <p style={{ 
-                      fontSize: '0.8rem', 
-                      color: '#64748b', 
-                      marginTop: '10px',
-                      fontStyle: 'italic'
-                    }}>
-                      Amount: ₹{selectedOrder?.amount || 0}
-                    </p>
-                  </div>
-                )}
-
-                <div style={{ margin: '20px 0' }}>
-                  <Label>Delivery Notes:</Label>
-                  <TextArea 
-                    placeholder="Add any delivery notes..."
-                    value={delivery.notes}
-                    onChange={(e) => setDelivery(prev => ({ ...prev, notes: e.target.value }))}
-                  />
-                </div>
-
-                {/* Delivery Logic Preview */}
-                <div style={{ 
-                  padding: '15px', 
-                  borderRadius: '8px', 
-                  marginBottom: '20px',
-                  background: delivery.jarReturned && delivery.paymentReceived ? '#d1fae5' : 
-                    !delivery.jarReturned ? '#fef3c7' : '#fee2e2',
-                  color: delivery.jarReturned && delivery.paymentReceived ? '#065f46' : 
-                    !delivery.jarReturned ? '#92400e' : '#991b1b'
-                }}>
-                  <strong>Result:</strong> {
-                    `Deduct ₹${selectedOrder.quantity * 37} from wallet balance` +
-                    (!delivery.jarReturned ? ` and add ${selectedOrder.quantity} jar(s) to hold jars` : '')
-                  }
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <ActionButton variant="primary" onClick={handleMarkDelivered} disabled={processing}>
-                    <FiCheckCircle />{processing ? 'Processing...' : 'Confirm Completion'}
-                  </ActionButton>
+                <TextArea placeholder="Notes..." value={delivery.notes} onChange={(e) => setDelivery(p => ({ ...p, notes: e.target.value }))} />
+                <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+                  <ActionButton variant="primary" onClick={handleMarkDelivered} disabled={processing}>Confirm</ActionButton>
                   <ActionButton onClick={() => setShowModal(false)}>Cancel</ActionButton>
+                </div>
+              </ModalBody>
+            </ModalContent>
+          </Modal>
+        )}
+
+        {showQRModal && selectedQRCodeOrder && (
+          <Modal initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <ModalContent initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} style={{ maxWidth: '400px', textAlign: 'center' }}>
+              <CloseBtn onClick={() => setShowQRModal(false)}><FiX /></CloseBtn>
+              <ModalHeader><ModalTitle style={{ justifyContent: 'center' }}>Receive Payment</ModalTitle></ModalHeader>
+              <ModalBody>
+                <div style={{ marginBottom: '20px', fontSize: '1.2rem', fontWeight: '800', color: '#1e293b' }}>
+                  Amount to Collect: <span style={{ color: '#10b981', fontSize: '1.5rem' }}>₹{selectedQRCodeOrder.amount}</span>
+                </div>
+                
+                <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '16px', display: 'inline-block', boxShadow: '0 4px 10px rgba(0,0,0,0.05)' }}>
+                  <Image 
+                    src="/HYDRANT_PAYMENT_QR copy.jpeg" 
+                    alt="Payment QR Code" 
+                    width={250} 
+                    height={250} 
+                    style={{ borderRadius: '12px', objectFit: 'contain' }}
+                  />
+                </div>
+
+                <div style={{ marginTop: '20px', fontSize: '0.9rem', color: '#64748b', fontWeight: '600' }}>
+                  Order #{selectedQRCodeOrder.id} <br />
+                  Customer: {selectedQRCodeOrder.userName}
+                </div>
+
+                <div style={{ marginTop: '25px' }}>
+                  <ActionButton 
+                    variant="primary" 
+                    onClick={() => {
+                      setShowQRModal(false);
+                      handleDeliveryClick(selectedQRCodeOrder);
+                    }} 
+                    style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: '1rem' }}
+                  >
+                    Proceed to Deliver <FiCheckCircle size={18} />
+                  </ActionButton>
                 </div>
               </ModalBody>
             </ModalContent>

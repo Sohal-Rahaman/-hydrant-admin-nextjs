@@ -21,14 +21,45 @@ import {
   calculateRevenue, 
   getPincodeAnalytics,
   triggerSubscriptionOrders,
-  getDeliveryAnalytics
+  getDeliveryAnalytics,
+  db
 } from '@/lib/firebase';
-import { serverTimestamp, doc, onSnapshot, getFirestore, setDoc } from 'firebase/firestore';
+import { normalizeOrderStatus } from '@/lib/orderStatus';
+import { serverTimestamp, doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 
 const DashboardContainer = styled.div`
   padding: 20px;
   max-width: 1400px;
   margin: 0 auto;
+`;
+
+const ChartsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  gap: 20px;
+  margin-top: 30px;
+  margin-bottom: 30px;
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ChartCard = styled(motion.div)`
+  background: white;
+  border-radius: 15px;
+  padding: 20px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  border: 1px solid #f0f0f0;
+
+  h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: #333;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
 `;
 
 const Header = styled.div`
@@ -321,6 +352,12 @@ export default function AdminDashboard() {
     totalUsers: 0,
     totalRevenue: 0
   });
+
+  const [chartData, setChartData] = useState<{
+    date: string;
+    orders: number;
+    newUsers: number;
+  }[]>([]);
   
 interface OrderData {
   id: string;
@@ -351,11 +388,22 @@ interface SubscriptionData {
 }
 
 // Helper function to convert various date formats to Date object
-const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Date => {
+const toDate = (dateValue: any): Date => {
   if (!dateValue) return new Date();
   if (dateValue instanceof Date) return dateValue;
-  if (typeof dateValue === 'object' && 'toDate' in dateValue) return dateValue.toDate();
-  return new Date(dateValue);
+  if (typeof dateValue === 'object' && dateValue.toDate && typeof dateValue.toDate === 'function') {
+    return dateValue.toDate();
+  }
+  if (typeof dateValue === 'object' && dateValue.seconds) {
+    return new Date(dateValue.seconds * 1000);
+  }
+  try {
+    const d = new Date(dateValue);
+    if (isNaN(d.getTime())) return new Date();
+    return d;
+  } catch {
+    return new Date();
+  }
 };
 
   const [orders, setOrders] = useState<OrderData[]>([]);
@@ -431,7 +479,6 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
   useEffect(() => {
     setLoading(true);
     setError('');
-    const db = getFirestore();
 
     // Subscribe to live dashboard stats from Firebase dashboard_stats collection
     const unsubscribeStats = onSnapshot(
@@ -545,7 +592,7 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
             id: doc.id,
             ...data,
             createdAt: data.createdAt || data.orderDate || data.timestamp || new Date(),
-            status: data.status || 'pending',
+            status: normalizeOrderStatus(data.status),
             quantity: data.items?.[0]?.quantity || data.quantity || 1,
             amount: data.total || data.amount || 37
           };
@@ -565,6 +612,9 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
         setOrders(ordersData);
         
         // Set recent orders (last 10)
+        setOrders(ordersData);
+        
+        // Set recent orders (last 10)
         const sortedOrders = [...ordersData].sort((a, b) => {
           const dateA = toDate(a.createdAt);
           const dateB = toDate(b.createdAt);
@@ -575,7 +625,7 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
         // Calculate pincode analytics
         setPincodeAnalytics(getPincodeAnalytics(ordersData));
         
-        calculateStats(ordersData, users);
+        calculateStats(ordersData, []); // Pass current users if needed, or wait for users effect
       } catch (error) {
         console.error('❌ Error processing orders:', error);
         setError('Failed to load orders data');
@@ -649,6 +699,45 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
       clearTimeout(timer);
     };
   }, []);
+
+  // Effect to calculate chart data whenever orders or users change
+  useEffect(() => {
+    if (!orders.length && !users.length) return;
+
+    const last7DaysData = [];
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const nextD = new Date(d);
+      nextD.setDate(nextD.getDate() + 1);
+
+      const dayLabel = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+      // get orders for this day
+      const dayOrders = orders.filter(order => {
+        const orderDate = toDate(order.createdAt);
+        return orderDate >= d && orderDate < nextD;
+      });
+
+      // get users for this day
+      const dayUsers = users.filter(user => {
+        const joinDate = toDate(user.createdAt);
+        return joinDate >= d && joinDate < nextD;
+      });
+
+      last7DaysData.push({
+        date: dayLabel,
+        orders: dayOrders.length,
+        newUsers: dayUsers.length,
+      });
+    }
+
+    console.log('📈 Chart Data Updated:', last7DaysData);
+    setChartData(last7DaysData);
+  }, [orders, users]);
 
   const calculateStats = (ordersData: OrderData[], usersData: UserData[]) => {
     const today = new Date();
@@ -745,7 +834,6 @@ const toDate = (dateValue: Date | { toDate: () => Date } | string | number): Dat
 
   const createDashboardStatsDocument = async () => {
     try {
-      const db = getFirestore();
       const sampleStats = {
         todayRevenue: 74,
         processingOrders: 2,
@@ -836,20 +924,56 @@ Check console for detailed logs`);
         </ActionButtons>
       </Header>
 
-      <InfoBox>
-        <FiInfo />
-        <div>
-          <strong>📊 Live Dashboard - Real-Time KPI from Firebase dashboard_stats Collection:</strong>
-          <br />• <strong>Data Source:</strong> Firebase collection 'dashboard_stats/live_metrics' document
-          <br />• <strong>Today&apos;s Revenue:</strong> Today&apos;s completed orders quantity × ₹37 per jar
-          <br />• <strong>Processing Orders:</strong> Orders with pending or processing status (excludes cancelled/completed)
-          <br />• <strong>New Customers Today:</strong> Users who joined within the last 24 hours
-          <br />• <strong>Total Orders:</strong> All orders (open + cancelled + delivered)
-          <br />• <strong>Total Users:</strong> Total registered users in Firebase database
-          <br />• <strong>Total Revenue:</strong> All completed orders quantity × ₹37 per jar
-          <br />🔄 <em>Data updates automatically from Firebase dashboard_stats collection in real-time</em>
-        </div>
-      </InfoBox>
+      <ChartsGrid>
+        <ChartCard
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <h3>Orders Overview (Last 7 Days)</h3>
+          <div style={{ width: '100%', height: 300 }}>
+            <ResponsiveContainer>
+              <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorOrders" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
+                />
+                <Area type="monotone" dataKey="orders" name="Total Orders" stroke="#3b82f6" fillOpacity={1} fill="url(#colorOrders)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartCard>
+
+        <ChartCard
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <h3>User Growth (Last 7 Days)</h3>
+          <div style={{ width: '100%', height: 300 }}>
+            <ResponsiveContainer>
+              <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
+                  cursor={{ fill: '#f3f4f6' }}
+                />
+                <Bar dataKey="newUsers" name="New Users" fill="#10b981" radius={[4, 4, 0, 0]} barSize={30} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartCard>
+      </ChartsGrid>
 
       <StatsGrid>
         <StatCard

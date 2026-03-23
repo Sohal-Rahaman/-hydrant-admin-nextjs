@@ -26,6 +26,17 @@ const DeletionRequestsPage = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const { userData } = useAuth();
 
+  // Helper function to convert various date formats to Date object
+  const toDate = (dateValue: any): Date => {
+    if (!dateValue) return new Date();
+    if (dateValue instanceof Date) return dateValue;
+    if (typeof dateValue === 'object' && 'toDate' in dateValue && typeof dateValue.toDate === 'function') {
+      return dateValue.toDate();
+    }
+    const d = new Date(dateValue);
+    return isNaN(d.getTime()) ? new Date() : d;
+  };
+
   useEffect(() => {
     if (!userData?.isAdmin) return;
 
@@ -133,7 +144,7 @@ const DeletionRequestsPage = () => {
               <RequestEmail>{request.email}</RequestEmail>
               <RequestPhone>{request.phone}</RequestPhone>
               <RequestDate>
-                Requested: {request.createdAt?.toDate?.()?.toLocaleDateString() || 'Unknown date'}
+                Requested: {toDate(request.createdAt).toLocaleDateString()}
               </RequestDate>
               <DeleteButton onClick={(e) => {
                 e.stopPropagation();

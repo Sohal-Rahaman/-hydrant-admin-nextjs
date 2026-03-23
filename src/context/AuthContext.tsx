@@ -11,6 +11,7 @@ interface UserData {
   phoneNumber?: string;
   photoURL?: string;
   isAdmin?: boolean;
+  role?: 'superadmin' | 'admin' | 'manager' | 'support';
   customerId?: string;
   wallet_balance?: number;
   jars_occupied?: number;
@@ -23,6 +24,7 @@ interface AuthContextType {
   currentUser: User | null;
   userData: UserData | null;
   isAdmin: boolean;
+  role: 'superadmin' | 'admin' | 'manager' | 'support' | null;
   loading: boolean;
   signIn: () => Promise<UserCredential>;
   signInWithEmailPassword: (email: string, password: string) => Promise<UserCredential>;
@@ -49,6 +51,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [role, setRole] = useState<AuthContextType['role']>(null);
 
   // Sign in with Google
   const signIn = async () => {
@@ -86,6 +89,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const checkAdminPrivileges = async (user: User | null): Promise<boolean> => {
     if (!user) {
       setIsAdmin(false);
+      setRole(null);
       return false;
     }
 
@@ -93,10 +97,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const data = await getUserData(user.uid) as UserData | null;
       if (data && data.isAdmin === true) {
         setIsAdmin(true);
+        setRole(data.role || 'admin');
         setUserData(data);
         return true;
       } else {
         setIsAdmin(false);
+        setRole(null);
         setUserData(data);
         return false;
       }
@@ -116,6 +122,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       } else {
         setUserData(null);
         setIsAdmin(false);
+        setRole(null);
       }
       
       setLoading(false);
@@ -128,6 +135,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     currentUser,
     userData,
     isAdmin,
+    role,
     loading,
     signIn,
     signInWithEmailPassword,
@@ -137,7 +145,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)', color: 'white', fontSize: '1.2rem' }}>
+          Loading...
+        </div>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   );
 };

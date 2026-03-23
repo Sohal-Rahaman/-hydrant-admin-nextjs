@@ -8,6 +8,21 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
+// Align with iOS User App - HYDRANT_ALIGNMENT.md
+function normalizeOrderStatus(raw) {
+  const key = String(raw || '').toLowerCase().trim();
+  const map = {
+    pending: 'pending', processing: 'processing', completed: 'completed', cancelled: 'cancelled',
+    delivered: 'completed', canceled: 'cancelled', placed: 'pending', confirmed: 'processing',
+    in_progress: 'processing', out_for_delivery: 'processing', in_transit: 'processing',
+  };
+  return map[key] || 'pending';
+}
+function isOpenOrderStatus(status) {
+  const n = normalizeOrderStatus(status);
+  return n === 'pending' || n === 'processing';
+}
+
 // Function to update dashboard stats
 async function updateDashboardStats() {
   try {
@@ -40,16 +55,14 @@ async function updateDashboardStats() {
     });
     
     // Calculate Today's Revenue: (today total order quantity - today cancelled orders) * 37
-    const todayDeliveredOrders = todayOrders.filter(order => order.status === 'completed');
+    const todayDeliveredOrders = todayOrders.filter(order => normalizeOrderStatus(order.status) === 'completed');
     const todayDeliveredQuantity = todayDeliveredOrders.reduce((sum, order) => {
       return sum + (order.quantity || order.items?.[0]?.quantity || 1);
     }, 0);
     const todayRevenue = todayDeliveredQuantity * 37;
     
-    // Calculate Processing Orders: open orders (not including cancelled or delivered)
-    const processingOrders = orders.filter(order => 
-      order.status === 'pending' || order.status === 'processing'
-    ).length;
+    // Calculate Processing Orders: open orders (includes placed, confirmed, in_progress, out_for_delivery from iOS)
+    const processingOrders = orders.filter(order => isOpenOrderStatus(order.status)).length;
     
     // Calculate Total Orders: open + cancelled + delivered = total orders
     const totalOrders = orders.length;
@@ -58,7 +71,7 @@ async function updateDashboardStats() {
     const totalUsers = users.length;
     
     // Calculate Total Revenue: all delivered orders quantity * 37
-    const deliveredOrders = orders.filter(order => order.status === 'completed');
+    const deliveredOrders = orders.filter(order => normalizeOrderStatus(order.status) === 'completed');
     const totalDeliveredQuantity = deliveredOrders.reduce((sum, order) => {
       return sum + (order.quantity || order.items?.[0]?.quantity || 1);
     }, 0);
