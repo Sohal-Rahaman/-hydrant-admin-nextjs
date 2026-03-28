@@ -18,10 +18,10 @@ import {
   query, 
   where, 
   onSnapshot,
-  db,
   doc,
   updateDoc
-} from '@/lib/firebase';
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 interface KYCRequest {
   id: string;

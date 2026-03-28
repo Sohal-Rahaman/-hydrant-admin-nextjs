@@ -20,12 +20,12 @@ import {
   query, 
   orderBy, 
   onSnapshot,
-  db,
   doc,
   updateDoc,
   increment,
   arrayUnion
-} from '@/lib/firebase';
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 interface UserData {
   id: string;

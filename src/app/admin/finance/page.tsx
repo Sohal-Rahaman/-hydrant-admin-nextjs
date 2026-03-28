@@ -29,9 +29,9 @@ import {
   collection, 
   query, 
   orderBy, 
-  onSnapshot,
-  db 
-} from '@/lib/firebase';
+  onSnapshot
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 const data = [
   { name: 'Mon', revenue: 4200, profit: 2100 },

@@ -18,9 +18,9 @@ import {
   collection, 
   query, 
   where, 
-  onSnapshot,
-  db 
-} from '@/lib/firebase';
+  onSnapshot
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 interface ArmyProfile {
   id: string;
