@@ -461,7 +461,7 @@ export default function OrdersPage() {
             userId: String(data.userId || data.customerId || ''),
             userName: String(data.customerName || data.userName || data.full_name || data.name || ''),
             userPhone: String(data.customerPhone || data.phoneNumber || data.phone || ''),
-            status: String(data.status || 'pending'),
+            status: String(data.status || 'pending') as Order['status'],
             quantity: totalQty,
             amount: totalAmt,
             address: {
@@ -471,7 +471,7 @@ export default function OrdersPage() {
               full: addrFull
             },
             createdAt: data.createdAt || data.orderDate || data.timestamp || new Date(),
-            orderType: String(data.orderType || (data.subscriptionId ? 'subscription' : 'regular')),
+            orderType: String(data.orderType || (data.subscriptionId ? 'subscription' : 'regular')) as Order['orderType'],
             deliverySlot: data.deliverySlot,
             deliveryDate: data.deliveryDate,
             isPriority: data.isPriority,
@@ -481,7 +481,7 @@ export default function OrdersPage() {
             hasLift: data.hasLift ?? data.deliveryAddress?.hasLift ?? data.address?.hasLift,
             isAddressVerified: data.isAddressVerified ?? data.deliveryAddress?.isVerified ?? data.address?.isVerified,
             bewareOfDogs: data.bewareOfDogs ?? data.deliveryAddress?.bewareOfDogs ?? data.address?.bewareOfDogs,
-            paymentMethod: String(data.paymentMethod || 'cash'),
+            paymentMethod: String(data.paymentMethod || 'cash') as Order['paymentMethod'],
             deliveryPartner: data.deliveryPartner,
             updatedAt: data.updatedAt,
             priority: data.priority ?? 0,
