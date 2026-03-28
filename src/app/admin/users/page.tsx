@@ -1,2442 +1,1240 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import Image from 'next/image';
-import styled, { css } from 'styled-components';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useCallback } from 'react';
+import styled from 'styled-components';
 import {
-  FiUsers, FiSearch, FiPhone, FiMail, FiMapPin, FiCalendar,
-  FiDollarSign, FiPackage, FiX, FiEdit3, FiSave, FiRefreshCw,
-  FiNavigation, FiTrendingUp, FiCheckCircle, FiXCircle,
-  FiStar, FiClock, FiActivity, FiArrowRight, FiInfo
-} from 'react-icons/fi';
-import {
-  subscribeToCollection,
-  updateDocument,
-  addDocument,
-  deleteDocument,
-  generateCustomerId,
-  getDocument
+  subscribeToCollection, updateDocument, addDocument, deleteDocument
 } from '@/lib/firebase';
+import { FiSearch, FiGift, FiCopy, FiPhoneCall, FiBell, FiSlash, FiChevronDown, FiChevronUp, FiCheck, FiPackage, FiMessageCircle, FiPlus, FiTrash2, FiEdit2 } from 'react-icons/fi';
+import { where, serverTimestamp, writeBatch, doc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
-import { logActivity } from '@/lib/activityLogger';
+import { useSearchParams, useRouter } from 'next/navigation';
 
-// Interface definitions
+// ─── Types ────────────────────────────────────────────────
 interface Address {
-  id: string;
-  userId: string;
-  type: string; // 'home', 'office', etc.
-  addressLine?: string; // Full address line from Firebase
-  street: string;
-  city: string;
-  state: string;
-  pincode: string;
-  floor?: string;
-  apartment?: string;
-  landmark?: string;
-  isDefault: boolean;
-  createdAt: Date | { toDate(): Date } | string;
+  id?: string; userId?: string;
+  // Core fields (matches iOS AppContext.jsx saveAddress schema)
+  address_type: string;      // 'Home' | 'Office' | 'Other'
+  address_line?: string;     // full formatted address string
+  plus_code?: string;        // critical for pinpoint delivery
+  house_no?: string;         // e.g. "402, Block B"
+  floor_no?: string;         // e.g. "3"
+  landmark?: string;         // optional
+  lift_available?: string | null;  // 'Yes' | 'No' | null
+  be_aware_of_dogs?: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+  isDefault?: boolean;
+  createdAt?: unknown; updatedAt?: unknown;
 }
-
-interface User {
-  id: string;
-  customerId: string;
-  name: string; // Single name field from Firebase
-  firstName?: string; // Legacy field for backward compatibility
-  lastName?: string; // Legacy field for backward compatibility
-  email: string;
-  phoneNumber: string;
-  createdAt: Date | { toDate(): Date } | string;
-  totalCoins: number;
-  totalShares: number;
-  wallet_balance: number;
-  jars_occupied: number;
-  totalRevenue: number;
-  totalCans: number;
-  orders: Order[];
-  addresses: Address[];
-  subscription?: Subscription;
-  referralCoins?: number;
-  depositMoney?: number;
-  role?: string;
-  firstOrderDate?: Date | null;
-  lastOrderDate?: Date | null;
-  totalCompletedOrders?: number;
-  totalCancelledOrders?: number;
-}
-
-// --- Helper Functions ---
-const formatDate = (date: Date | { toDate(): Date } | string | number | undefined, includeTime = false) => {
-  if (!date) return 'N/A';
-  let d: Date;
-
-  if (typeof date === 'string' || typeof date === 'number') {
-    d = new Date(date);
-  } else if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
-    d = date.toDate();
-  } else if (date instanceof Date) {
-    d = date;
-  } else {
-    return 'N/A';
-  }
-
-  if (isNaN(d.getTime())) return 'N/A';
-
-  const options: Intl.DateTimeFormatOptions = {
-    day: 'numeric', month: 'short', year: 'numeric',
-    ...(includeTime && { hour: '2-digit', minute: '2-digit' })
-  };
-  return d.toLocaleDateString('en-IN', options);
-};
-
-const openMap = (address: Address) => {
-  const query = address.addressLine || `${address.street}, ${address.city}, ${address.pincode}`;
-  window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`, '_blank');
-};
-
 interface Order {
-  id: string;
-  userId: string;
-  status: string;
-  createdAt: Date | { toDate(): Date } | string;
-  [key: string]: unknown;
+  id: string; userId?: string; status: string;
+  createdAt?: { toDate(): Date } | Date | string;
+  quantity: number; 
+  amount: number; 
+  totalAmount?: number;
+  paymentMethod?: string;
+  slot?: any; 
+  address?: any;
+  items?: any[];
+  raw?: any;
+  fastDelivery?: boolean; 
+  discount?: number; 
+  deposit?: number;
+}
+interface Transaction {
+  id: string; userId?: string; type: 'credit' | 'debit';
+  amount: number; category?: string; method?: string;
+  note?: string; createdAt?: { toDate(): Date } | Date | string;
+}
+interface User {
+  id: string; customerId: string; name?: string;
+  full_name?: string; displayName?: string;
+  firstName?: string; lastName?: string;
+  email?: string; phoneNumber?: string; phone?: string; alt_phone?: string;
+  wallet_balance?: number; jars_occupied?: number;
+  createdAt?: { toDate(): Date } | Date | string;
+  role?: string; isActive?: boolean; status?: string;
+  addresses?: Address[]; orders?: Order[];
 }
 
-interface Subscription {
-  id: string;
-  userId: string;
-  isActive: boolean;
-  plan: string;
-  planType?: string;
-  totalMonthlyJars?: number;
-  jarsDeliveredThisCycle?: number;
-  carryForwardJars?: number;
-  startDate: Date | { toDate(): Date } | string;
-  endDate?: Date | { toDate(): Date } | string;
-  nextDelivery?: Date | { toDate(): Date } | string;
-  frequency?: string; // weekly, monthly, etc.
-  deliveryDays?: string[];
-  deliverySlot?: string;
-  planPrice?: number;
-  totalDeliveries?: number;
-  remainingDeliveries?: number;
-  pausedUntil?: Date | { toDate(): Date } | string;
-  createdAt: Date | { toDate(): Date } | string;
-  updatedAt?: Date | { toDate(): Date } | string;
-}
+// ─── Helpers ──────────────────────────────────────────────
+const fmt = (d?: { toDate(): Date } | Date | string | null) => {
+  if (!d) return '—';
+  try {
+    const dt = typeof d === 'object' && 'toDate' in d ? d.toDate() : new Date(d as string | Date);
+    return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch { return '—'; }
+};
+const dName = (u: User) => u.full_name || u.name || u.displayName || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Unknown';
+const initials = (n: string) => n.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+const AVATAR_PALETTES = [
+  { bg: '#E6F1FB', tc: '#185FA5' }, { bg: '#E1F5EE', tc: '#0F6E56' },
+  { bg: '#FAEEDA', tc: '#854F0B' }, { bg: '#FBEAF0', tc: '#993556' },
+  { bg: '#EEEDFE', tc: '#3C3489' },
+];
+const palette = (id: string) => AVATAR_PALETTES[(id?.charCodeAt(0) ?? 0) % AVATAR_PALETTES.length];
+const statusBadge = (s: string) =>
+  s === 'delivered' || s === 'completed' ? 'b-delivered' :
+  s === 'cancelled' ? 'b-cancelled' :
+  s === 'in_transit' || s === 'in transit' ? 'b-transit' : 'b-pending';
+const payBadge = (p?: string) =>
+  p === 'wallet' || p === 'Wallet' ? 'b-wallet' :
+  p === 'cash' || p === 'Cash' ? 'b-cash' : 'b-upi';
 
-// Styled Components (abbreviated for brevity)
-const UsersContainer = styled.div`
-  padding: 20px;
-  max-width: 1400px;
-  margin: 0 auto;
+// ─── Styled Components ────────────────────────────────────
+const Wrap = styled.div`
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  height: calc(100vh - 40px);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--color-background-primary);
 `;
-
-const Header = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 30px;
-  flex-wrap: wrap;
-  gap: 20px;
+const Sidebar = styled.div`
+  background: var(--color-background-secondary);
+  border-right: 0.5px solid var(--color-border-tertiary);
+  display: flex; flex-direction: column;
+  min-height: 0;
 `;
-
-const SortSelect = styled.select`
-  padding: 12px 16px;
-  border: 2px solid #e5e7eb;
-  border-radius: 10px;
-  font-size: 0.9rem;
-  background: white;
-  cursor: pointer;
-  transition: all 0.3s ease;
-
-  &:focus {
-    outline: none;
-    border-color: #8e2de2;
-    box-shadow: 0 0 0 3px rgba(142, 45, 226, 0.1);
-  }
+const SideHead = styled.div`
+  padding: 12px;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
 `;
-
-const SortContainer = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
+const SHeadLabel = styled.div`
+  font-size: 10px; color: var(--color-text-tertiary);
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px;
 `;
-
-const SortLabel = styled.span`
-  font-weight: 600;
-  color: #333;
-`;
-
-const TitleSection = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 15px;
-`;
-
-const UsersLogo = styled(Image)`
-  width: 45px;
-  height: 45px;
-  border-radius: 8px;
-  object-fit: cover;
-`;
-
-const Title = styled.h1`
-  color: #333;
-  margin: 0;
-  font-size: 2rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-`;
-
-const SearchBox = styled.div`
+const Search = styled.div`
   position: relative;
-  display: flex;
-  align-items: center;
-
+  svg { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--color-text-tertiary); font-size: 12px; }
 `;
-
 const SearchInput = styled.input`
-  padding: 12px 16px 12px 45px;
-  border: 2px solid #e5e7eb;
-  border-radius: 10px;
-  font-size: 0.9rem;
-  width: 400px;
-  transition: all 0.3s ease;
-
-  &:focus {
-    outline: none;
-    border-color: #8e2de2;
-    box-shadow: 0 0 0 3px rgba(142, 45, 226, 0.1);
-  }
+  width: 100%; padding: 6px 10px 6px 28px; font-size: 12px;
+  border: 0.5px solid var(--color-border-secondary); border-radius: 8px;
+  background: var(--color-background-primary); color: var(--color-text-primary);
+  &:focus { outline: none; border-color: var(--color-border-info); }
 `;
-
-const SearchIcon = styled(FiSearch)`
-  position: absolute;
-  left: 15px;
-  color: #6b7280;
-  font-size: 1.1rem;
-`;
-
-const Container = styled.div`
-  padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
-`;
-
-const UserGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 2rem;
-`;
-
-const UserCard = styled(motion.div)`
-  background: white;
-  padding: 25px;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid #f0f0f0;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.3s ease;
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%);
-  }
-
-  &:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-    border-color: #8e2de2;
-  }
-
-  &:active {
-    transform: translateY(-2px);
-  }
-`;
-
-const UserName = styled.h3`
-  color: #333;
-  margin: 0 0 8px 0;
-  font-size: 1.2rem;
-  font-weight: 600;
-`;
-
-const UserEmail = styled.div`
-  color: #666;
-  font-size: 0.9rem;
-  margin-bottom: 4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-`;
-
-const UserPhone = styled.div`
-  color: #666;
-  font-size: 0.9rem;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-`;
-
-const CustomerId = styled.div`
-  color: #8e2de2;
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-top: 4px;
-`;
-
-const AddressPreview = styled.div`
-  color: #666;
-  font-size: 0.85rem;
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-`;
-
-const UserStats = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 15px;
-  margin-top: 20px;
-`;
-
-const ClickHint = styled.div`
-  color: #8e2de2;
-  font-size: 0.8rem;
-  text-align: center;
-  margin-top: 15px;
-  opacity: 0.7;
-  transition: all 0.3s ease;
-
-  ${UserCard}:hover & {
-    opacity: 1;
-  }
-`;
-
-const StatItem = styled.div`
-  text-align: center;
-`;
-
-const StatValue = styled.div`
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: #333;
-  margin-bottom: 4px;
-`;
-
-const StatLabel = styled.div`
-  color: #666;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  font-weight: 500;
-`;
-
-const SubscriptionBadge = styled.div<{ active: boolean }>`
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  ${props => props.active
-    ? `background: #d1fae5; color: #065f46;`
-    : `background: #fee2e2; color: #991b1b;`
-  }
-`;
-
-const LoadingSpinner = styled(motion.div)`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
-  
-  svg {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-`;
-
-const EmptyState = styled.div`
-  text-align: center;
-  padding: 60px 20px;
-  color: #666;
-`;
-
-const UserDetailGrid = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 30px;
-  margin-bottom: 30px;
-
-  @media (max-width: 768px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const InfoBox = styled.div`
-  background: #e0f2fe;
-  border: 1px solid #0891b2;
-  color: #0c4a6e;
-  padding: 15px;
-  border-radius: 10px;
-  margin-bottom: 20px;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  font-size: 0.9rem;
-  line-height: 1.5;
-`;
-
-
-const AddressType = styled.div`
-  background: #8e2de2;
-  color: white;
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  display: inline-block;
-  margin-bottom: 8px;
-`;
-
-const AddressText = styled.div`
-  color: #495057;
-  font-size: 0.9rem;
-  line-height: 1.4;
-`;
-
-// Modal Components
-const ModalOverlay = styled(motion.div)`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(5px);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-`;
-
-const ModalContent = styled(motion.div)`
-  background: white;
-  border-radius: 20px;
-  width: 100%;
-  max-width: 900px;
-  max-height: 90vh;
+const UserList = styled.div`
+  flex: 1; 
   overflow-y: auto;
-  position: relative;
-`;
-
-const ModalHeader = styled.div`
-  padding: 30px 30px 0 30px;
-  border-bottom: 1px solid #f0f0f0;
-  margin-bottom: 30px;
-`;
-
-const ModalTitle = styled.h2`
-  color: #333;
-  margin: 0 0 20px 0;
-  font-size: 1.5rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-`;
-
-const CloseButton = styled.button`
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  color: #666;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 8px;
-  transition: all 0.3s ease;
-
-  &:hover {
-    background: #f3f4f6;
-    color: #333;
-  }
-`;
-
-const ModalBody = styled.div`
-  padding: 0 30px 30px 30px;
-`;
-
-
-
-const DetailSection = styled.div`
-  background: #f9fafb;
-  padding: 25px;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-`;
-
-const SectionTitle = styled.h3`
-  color: #333;
-  margin: 0 0 20px 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-`;
-
-const DetailItem = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 0;
-  border-bottom: 1px solid #e5e7eb;
-
-  &:last-child {
-    border-bottom: none;
-  }
-`;
-
-const DetailLabel = styled.div`
-  color: #666;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-`;
-
-const DetailValue = styled.div`
-  color: #333;
-  font-weight: 600;
-  text-align: right;
-`;
-
-const EditableField = styled.input`
-  background: white;
-  border: 2px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 8px 12px;
-  font-size: 0.9rem;
-  width: 100%;
-  transition: all 0.3s ease;
-
-  &:focus {
-    outline: none;
-    border-color: #8e2de2;
-    box-shadow: 0 0 0 3px rgba(142, 45, 226, 0.1);
-  }
-`;
-
-const ButtonGroup = styled.div`
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 20px;
-`;
-
-const ActionButton = styled(motion.button) <{ variant?: 'primary' | 'secondary' | 'danger' }>`
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  font-size: 0.85rem;
-  transition: all 0.3s ease;
-
-  ${props => {
-    switch (props.variant) {
-      case 'primary':
-        return `
-          background: linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%);
-          color: white;
-          &:hover { transform: translateY(-2px); }
-        `;
-      default:
-        return `
-          background: white;
-          color: #374151;
-          border: 2px solid #e5e7eb;
-          &:hover { border-color: #8e2de2; color: #8e2de2; }
-        `;
-    }
-  }}
-`;
-
-// New styled components for the enhanced UI
-const ModalSubtitle = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-  color: #64748b;
-  font-size: 0.9rem;
+  min-height: 0;
   
-  > div {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+  &::-webkit-scrollbar { width: 5px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb { background: var(--color-border-tertiary); border-radius: 10px; }
+  &:hover::-webkit-scrollbar-thumb { background: #cbd5e1; }
 `;
-
-const DeepStatsGrid = styled.div`
+const UserRow = styled.div<{ $active?: boolean }>`
+  padding: 9px 12px; cursor: pointer;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+  display: flex; align-items: center; gap: 8px;
+  background: ${p => p.$active ? 'var(--color-background-info)' : 'transparent'};
+  &:hover { background: ${p => p.$active ? 'var(--color-background-info)' : 'var(--color-background-primary)'}; }
+`;
+const Avatar = styled.div<{ $bg: string; $tc: string; $size?: number }>`
+  width: ${p => p.$size ?? 30}px; height: ${p => p.$size ?? 30}px;
+  border-radius: 50%; background: ${p => p.$bg}; color: ${p => p.$tc};
+  display: flex; align-items: center; justify-content: center;
+  font-size: ${p => (p.$size ?? 30) < 36 ? 11 : 14}px;
+  font-weight: 600; flex-shrink: 0;
+`;
+const UName = styled.div<{ $active?: boolean }>`
+  font-size: 12px; font-weight: 500;
+  color: ${p => p.$active ? 'var(--color-text-info)' : 'var(--color-text-primary)'};
+`;
+const UID = styled.div`font-size: 10px; color: var(--color-text-tertiary);`;
+const Main = styled.div`display: flex; flex-direction: column; overflow: hidden; min-width: 0;`;
+const MainHead = styled.div`
+  padding: 12px 16px; border-bottom: 0.5px solid var(--color-border-tertiary);
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
+`;
+const Badge = styled.span<{ $variant: string }>`
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 9px; border-radius: 20px; font-size: 10px; font-weight: 500;
+  ${p => p.$variant === 'success' && 'background:var(--color-background-success);color:var(--color-text-success);'}
+  ${p => p.$variant === 'warning' && 'background:var(--color-background-warning);color:var(--color-text-warning);'}
+  ${p => p.$variant === 'danger'  && 'background:var(--color-background-danger);color:var(--color-text-danger);'}
+  ${p => p.$variant === 'info'    && 'background:var(--color-background-info);color:var(--color-text-info);'}
+`;
+const BtnXS = styled.button<{ $variant?: string }>`
+  padding: 5px 12px; font-size: 11px; border-radius: 6px; cursor: pointer; font-weight: 500;
+  border: 1px solid ${p => p.$variant === 'danger' ? 'var(--color-text-danger)' : p.$variant === 'info' ? 'var(--color-text-info)' : 'var(--color-border-secondary)'};
+  background: ${p => p.$variant === 'info' ? 'var(--color-background-info)' : p.$variant === 'danger' ? 'var(--color-background-danger)' : 'var(--color-background-primary)'};
+  color: ${p => p.$variant === 'danger' ? 'var(--color-text-danger)' : p.$variant === 'info' ? 'var(--color-text-info)' : 'var(--color-text-primary)'};
+  display: flex; align-items: center; gap: 5px;
+  transition: all 0.2s;
+  &:hover { background: ${p => p.$variant === 'info' ? '#d0e5f9' : p.$variant === 'danger' ? '#fadedd' : 'var(--color-background-secondary)'}; }
+`;
+const TabBar = styled.div`
+  display: flex; border-bottom: 0.5px solid var(--color-border-tertiary);
+  padding: 0 16px; flex-shrink: 0; overflow-x: auto;
+  &::-webkit-scrollbar { display: none; }
+`;
+const Tab = styled.button<{ $active?: boolean }>`
+  padding: 10px 16px; font-size: 12px; cursor: pointer; font-weight: 600;
+  color: ${p => p.$active ? 'var(--color-text-info)' : 'var(--color-text-tertiary)'};
+  border: none; background: none; white-space: nowrap;
+  border-bottom: 2.5px solid ${p => p.$active ? 'var(--color-text-info)' : 'transparent'};
+  margin-bottom: -0.5px;
+  transition: all 0.2s;
+  &:hover { color: var(--color-text-primary); background: var(--color-background-secondary); }
+`;
+const TabBody = styled.div`padding: 14px 16px; overflow-y: auto; flex: 1;`;
+const Metrics = styled.div<{ $cols?: number }>`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2rem;
+  grid-template-columns: repeat(${p => p.$cols ?? 4}, 1fr);
+  gap: 8px; margin-bottom: 14px;
 `;
-
-const DeepStatCard = styled.div<{ color: string }>`
-  background: white;
-  border-radius: 12px;
-  padding: 1.5rem;
-  text-align: center;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e2e8f0;
-  transition: all 0.3s ease;
-  
-  &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
-  }
-  
-  .icon {
-    font-size: 2rem;
-    color: ${props => props.color};
-    margin-bottom: 0.5rem;
-  }
-  
-  h5 {
-    margin: 0.5rem 0 0.25rem 0;
-    color: #334155;
-    font-size: 0.875rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  
-  .value {
-    font-size: 1.875rem;
-    font-weight: 700;
-    color: ${props => props.color};
-    margin: 0.25rem 0;
-  }
-  
-  .sub {
-    font-size: 0.75rem;
-    color: #64748b;
-    margin: 0;
-  }
+const Metric = styled.div`
+  background: var(--color-background-secondary);
+  border-radius: 8px; padding: 10px 12px;
 `;
-
-const InfoGrid = styled.div`
-  display: flex;
-  gap: 2rem;
-  
-  @media (max-width: 768px) {
-    flex-direction: column;
-  }
+const ML = styled.div`font-size: 10px; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px;`;
+const MV = styled.div<{ $color?: string }>`font-size: 18px; font-weight: 500; color: ${p => p.$color ?? 'var(--color-text-primary)'};`;
+const MSub = styled.div`font-size: 10px; color: var(--color-text-tertiary); margin-top: 1px;`;
+const SectionTitle = styled.div`
+  font-size: 11px; font-weight: 500; color: var(--color-text-secondary);
+  text-transform: uppercase; letter-spacing: .05em; margin: 14px 0 8px;
 `;
-
-const ActionRow = styled.div`
-  display: flex;
-  justify-content: flex-end;
-  gap: 1rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid #e2e8f0;
-  margin-top: 1.5rem;
+const Table = styled.table`width: 100%; border-collapse: collapse; font-size: 12px;`;
+const Th = styled.th`
+  text-align: left; padding: 6px 10px; font-size: 10px; font-weight: 500;
+  color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 0.5px solid var(--color-border-tertiary); white-space: nowrap;
 `;
-
-const Button = styled.button<{ variant?: 'primary' | 'secondary' | 'danger' }>`
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 500;
-  transition: all 0.3s ease;
-  
-  ${props => {
-    switch (props.variant) {
-      case 'primary':
-        return `
-          background: linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%);
-          color: white;
-          &:hover { background: linear-gradient(135deg, #7e1dd2 0%, #3a00d0 100%); }
-        `;
-      case 'secondary':
-        return `
-          background: white;
-          color: #374151;
-          border: 1px solid #d1d5db;
-          &:hover { background: #f3f4f6; }
-        `;
-      case 'danger':
-        return `
-          background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
-          color: white;
-          &:hover { background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%); }
-        `;
-      default:
-        return `
-          background: white;
-          color: #374151;
-          border: 1px solid #d1d5db;
-          &:hover { background: #f3f4f6; }
-        `;
-    }
-  }}
+const Td = styled.td`
+  padding: 8px 10px; border-bottom: 0.5px solid var(--color-border-tertiary);
+  color: var(--color-text-primary); vertical-align: middle;
 `;
-
-// Additional missing styled components
-const TitleGroup = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 15px;
+const FilterBar = styled.div`display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;`;
+const FSel = styled.select`
+  padding: 5px 8px; font-size: 12px;
+  border: 0.5px solid var(--color-border-secondary); border-radius: 8px;
+  background: var(--color-background-secondary); color: var(--color-text-primary);
 `;
-
-const Logo = styled(Image)`
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
-  object-fit: cover;
+const FInput = styled.input`
+  padding: 5px 8px; font-size: 12px; width: 110px;
+  border: 0.5px solid var(--color-border-secondary); border-radius: 8px;
+  background: var(--color-background-secondary); color: var(--color-text-primary);
+  &:focus { outline: none; border-color: var(--color-border-info); }
 `;
-
-const PageTitle = styled.h1`
-  color: #333;
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  
-  span {
-    color: #8e2de2;
-  }
+const ExpandBtn = styled.button`
+  background: none; border: 0.5px solid var(--color-border-tertiary);
+  border-radius: 4px; padding: 2px 7px; font-size: 11px; cursor: pointer;
+  color: var(--color-text-secondary);
+  display: flex; align-items: center; gap: 4px;
+  &:hover { background: var(--color-background-secondary); }
 `;
-
-const Controls = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  flex-wrap: wrap;
+const OrderDetail = styled.div`
+  background: var(--color-background-secondary);
+  border-radius: 8px; padding: 12px; font-size: 12px;
+  border-left: 2px solid var(--color-border-info);
 `;
-
-const SearchWrapper = styled.div`
-  position: relative;
-  display: flex;
-  align-items: center;
+const DetailGrid = styled.div`
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px;
 `;
-
-const SelectInput = styled.select`
-  padding: 10px 14px;
-  border: 2px solid #e5e7eb;
-  border-radius: 10px;
-  font-size: 0.9rem;
-  background: white;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  
-  &:focus {
-    outline: none;
-    border-color: #8e2de2;
-    box-shadow: 0 0 0 3px rgba(142, 45, 226, 0.1);
-  }
+const ProfileGrid = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;`;
+const ProfileField = styled.div`
+  label { display: block; font-size: 10px; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 7px 10px; font-size: 13px; border: 0.5px solid var(--color-border-secondary); border-radius: 8px; background: var(--color-background-secondary); color: var(--color-text-primary); }
+  input:focus, select:focus { outline: none; border-color: var(--color-border-info); }
+  input:disabled { opacity: .5; }
 `;
-
-// Card components for the new UI
-const Card = styled(motion.div)`
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e2e8f0;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  overflow: hidden;
-  
-  &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
-    border-color: #8e2de2;
-  }
+const AddrCard = styled.div<{ $default?: boolean }>`
+  border: 0.5px solid ${p => p.$default ? 'var(--color-border-success)' : 'var(--color-border-tertiary)'};
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
+  background: ${p => p.$default ? 'var(--color-background-success)' : 'transparent'};
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
 `;
-
-const CardHeader = styled.div`
-  padding: 1.5rem;
-  border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+const RevGrid = styled.div`display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px;`;
+const RevCard = styled.div`background: var(--color-background-secondary); border-radius: 8px; padding: 12px;`;
+const WalletAdj = styled.div`background: var(--color-background-secondary); border-radius: 8px; padding: 12px; margin-bottom: 10px;`;
+const AdjRow = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; font-size: 11px; color: var(--color-text-secondary);`;
+const AdjInput = styled.input`padding: 6px 8px; font-size: 12px; border: 0.5px solid var(--color-border-secondary); border-radius: 8px; background: var(--color-background-primary); color: var(--color-text-primary);`;
+const AdjSelect = styled.select`padding: 6px 8px; font-size: 12px; border: 0.5px solid var(--color-border-secondary); border-radius: 8px; background: var(--color-background-primary); color: var(--color-text-primary);`;
+const BtnPrimary = styled.button`
+  padding: 8px 18px; background: var(--color-text-info); color: #fff; border: none; border-radius: 8px; 
+  font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(24, 95, 165, 0.2);
+  &:hover { opacity: .9; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(24, 95, 165, 0.3); }
+  &:active { transform: translateY(0); }
 `;
-
-const UserIdentity = styled.div`
-  h3 {
-    margin: 0 0 0.25rem 0;
-    color: #1e293b;
-    font-size: 1.125rem;
-    font-weight: 600;
-  }
-  
-  p {
-    margin: 0.25rem 0;
-    color: #64748b;
-    font-size: 0.875rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
+const BtnSec = styled.button`
+  padding: 8px 18px; background: var(--color-background-primary); 
+  border: 1px solid var(--color-border-secondary); border-radius: 8px; 
+  font-size: 12px; font-weight: 500; color: var(--color-text-primary); cursor: pointer;
+  transition: all 0.2s;
+  &:hover { background: var(--color-background-secondary); border-color: var(--color-text-tertiary); }
 `;
-
-const StatusBadge = styled.div<{ $active: boolean }>`
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  ${props => props.$active
-    ? `background: #d1fae5; color: #065f46;`
-    : `background: #fee2e2; color: #991b1b;`
-  }
+const ActionBar = styled.div`display: flex; gap: 8px; margin-top: 12px;`;
+const CopyBtn = styled.button`background: var(--color-background-info); border: none; border-radius: 6px; padding: 5px 10px; cursor: pointer; color: var(--color-text-info); display: flex; align-items: center; gap: 4px; font-size: 11px;`;
+const Toast = styled.div<{ $show: boolean }>`
+  position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+  padding: 10px 18px; background: var(--color-text-success); color: #fff;
+  border-radius: 8px; font-size: 13px; font-weight: 500;
+  transition: opacity .3s; opacity: ${p => p.$show ? 1 : 0}; pointer-events: none;
 `;
-
-const KeyStatsRow = styled.div`
-  display: flex;
-  justify-content: space-between;
-  padding: 1rem 1.5rem;
-  gap: 1rem;
-  
-  @media (max-width: 768px) {
-    flex-direction: column;
-    gap: 0.5rem;
-  }
+const EmptyState = styled.div`text-align: center; padding: 48px 20px; color: var(--color-text-tertiary); font-size: 14px;`;
+const BarWrap = styled.div`margin-bottom: 8px;`;
+const BarLabel = styled.div`display: flex; justify-content: space-between; font-size: 11px; color: var(--color-text-secondary); margin-bottom: 4px;`;
+const BarTrack = styled.div`height: 8px; background: var(--color-background-secondary); border-radius: 4px; overflow: hidden;`;
+const BarFill = styled.div<{ $w: number; $color: string }>`height: 100%; width: ${p => p.$w}%; background: ${p => p.$color}; border-radius: 4px; transition: width .4s;`;
+const MonoBadge = styled.span`font-family: monospace; font-size: 11px;`;
+const ModalBackdrop = styled.div`
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.4);
+  z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px;
+  backdrop-filter: blur(2px);
 `;
-
-const StatPill = styled.div<{ color: string }>`
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 0.75rem;
-  text-align: center;
-  flex: 1;
-  transition: all 0.3s ease;
-  
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-  }
-  
-  .label {
-    font-size: 0.75rem;
-    color: #64748b;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 0.25rem;
-  }
-  
-  .value {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: ${props => props.color};
-  }
+const ModalContainer = styled.div`
+  background: var(--color-background-primary); border-radius: 16px; width: 100%; max-width: 440px; 
+  position: relative; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden;
+  border: 1px solid var(--color-border);
 `;
+const ModalHead = styled.div`padding: 16px 20px; border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center; background: var(--color-background-secondary);`;
+const ModalTitle = styled.div`font-size: 14px; font-weight: 600; color: var(--color-text-primary);`;
+const CloseBtn = styled.button`background: none; border: none; font-size: 20px; color: var(--color-text-tertiary); cursor: pointer; &:hover { color: var(--color-text-primary); }`;
+const ModalBody = styled.div`padding: 20px;`;
 
-const CardFooter = styled.div`
-  padding: 1rem 1.5rem;
-  border-top: 1px solid #e2e8f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-`;
+// small inline badge for css-class approach
+const IBadge = ({ cls, children }: { cls: string; children: React.ReactNode }) => {
+  const map: Record<string, { bg: string; color: string }> = {
+    'b-delivered': { bg: 'var(--color-background-success)', color: 'var(--color-text-success)' },
+    'b-cancelled': { bg: 'var(--color-background-danger)', color: 'var(--color-text-danger)' },
+    'b-pending':   { bg: 'var(--color-background-warning)', color: 'var(--color-text-warning)' },
+    'b-transit':   { bg: 'var(--color-background-info)', color: 'var(--color-text-info)' },
+    'b-wallet':    { bg: '#E1F5EE', color: '#085041' },
+    'b-cash':      { bg: '#FAEEDA', color: '#633806' },
+    'b-upi':       { bg: '#EEEDFE', color: '#3C3489' },
+  };
+  const s = map[cls] ?? { bg: '#eee', color: '#333' };
+  return <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 500, background: s.bg, color: s.color }}>{children}</span>;
+};
 
-// --- Main Component ---
+const Bar = ({ label, val, total, color, suffix = '' }: { label: string; val: number; total: number; color: string; suffix?: string }) => (
+  <BarWrap>
+    <BarLabel><span>{label}</span><span>{suffix || val}</span></BarLabel>
+    <BarTrack><BarFill $w={total ? Math.round(val / total * 100) : 0} $color={color} /></BarTrack>
+  </BarWrap>
+);
+
+// ─── Main Component ───────────────────────────────────────
+type TabId = 'overview' | 'profile' | 'orders' | 'transactions' | 'revenue' | 'wallet';
 
 export default function UsersPage() {
-  const { currentUser, userData } = useAuth();
+  const { userData } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [sortOption, setSortOption] = useState('newest'); // Add sort option state
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [selectedReferralStats, setSelectedReferralStats] = useState({ pending: 0, completed: 0 });
-  const [editMode, setEditMode] = useState(false);
-  const [editedUser, setEditedUser] = useState<User | null>(null);
-  const [editedSubscription, setEditedSubscription] = useState<Subscription | null>(null);
-  const [subscriptionEditMode, setSubscriptionEditMode] = useState(false);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<User | null>(null);
+  const [tab, setTab] = useState<TabId>('overview');
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [toast, setToast] = useState('');
+  const [toastShow, setToastShow] = useState(false);
+
+  // order tab filters
+  const [fStatus, setFStatus] = useState('');
+  const [fPay, setFPay] = useState('');
+  const [fSlot, setFSlot] = useState('');
+  const [fSearch, setFSearch] = useState('');
+
+  // txn filters
+  const [ftType, setFtType] = useState('');
+  const [ftCat, setFtCat] = useState('');
+
+  // wallet adj
+  const [adjType, setAdjType] = useState('Credit');
+  const [adjAmt, setAdjAmt] = useState('');
+  const [adjReason, setAdjReason] = useState('');
+
+  // jar
+  const [jarCount, setJarCount] = useState('');
+  const [jarReason, setJarReason] = useState('');
+
+  // per-user caches
+  const [userOrders, setUserOrders] = useState<Order[]>([]);
+  const [userTxns, setUserTxns] = useState<Transaction[]>([]);
+  const [editFields, setEditFields] = useState<Partial<User>>({});
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  // formatDate is now defined at the top of the file for global use in this component
+  const [editingAddress, setEditingAddress] = useState<Address | null>(null);
+  const [isAddrModalOpen, setIsAddrModalOpen] = useState(false);
+  const [addrForm, setAddrForm] = useState<Partial<Address>>({});
 
   useEffect(() => {
-    setLoading(true);
-
-    // Subscribe to users collection with proper error handling
-    const unsubscribeUsers = subscribeToCollection('users', (snapshot) => {
-      console.log('Users snapshot received:', snapshot.docs.length, 'documents');
-      try {
-        const usersData = snapshot.docs.map((doc) => {
-          const data = doc.data();
-          console.log('User document:', doc.id, data);
-
-          // Check if user has legacy address structure
-          let legacyAddresses: Address[] = [];
-          if (data.address) {
-            legacyAddresses = [{
-              id: `legacy-${doc.id}`,
-              userId: doc.id,
-              type: 'home',
-              street: data.address.street || '',
-              city: data.address.city || '',
-              state: data.address.state || '',
-              pincode: data.address.pincode || '',
-              floor: data.address.floor || '',
-              apartment: data.address.apartment || '',
-              isDefault: true,
-              createdAt: new Date()
-            }];
-            console.log('Found legacy address for user:', doc.id, legacyAddresses);
-          }
-
-          return {
-            id: doc.id,
-            customerId: data.customerId || generateCustomerId(),
-            name: data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Unknown User',
-            firstName: data.firstName || '', // Keep for legacy support
-            lastName: data.lastName || '', // Keep for legacy support
-            email: data.email || '',
-            phoneNumber: data.phoneNumber || data.phone || '',
-            createdAt: data.createdAt || new Date(),
-            totalCoins: data.totalCoins || 0,
-            totalShares: data.totalShares || 0,
-            wallet_balance: data.wallet_balance || data.walletBalance || 0, // Use wallet_balance for user app compatibility
-            jars_occupied: data.jars_occupied || data.holdJars || data.occupiedJars || 0, // Use jars_occupied for user app compatibility
-            addresses: legacyAddresses, // Store legacy addresses temporarily
-            totalRevenue: 0, // Will be calculated later
-            totalCans: 0, // Will be calculated later
-            orders: [], // Will be populated later
-
-          };
-        });
-        console.log('Processed users:', usersData);
-        setUsers(usersData as User[]);
-      } catch (error) {
-        console.error('Error processing users:', error);
-        setUsers([]);
-      }
-    }, [], (error) => {
-      console.error('Error subscribing to users:', error);
-      setUsers([]);
-    });
-
-    // Subscribe to addresses collection with better error handling
-    const unsubscribeAddresses = subscribeToCollection('addresses', (snapshot) => {
-      console.log('Addresses snapshot received:', snapshot.docs.length, 'documents');
-      try {
-        const addressesData = snapshot.docs.map((doc) => {
-          const data = doc.data();
-          console.log('Address document:', doc.id, data);
-
-          // Handle the actual Firebase structure with address_line
-          const address = {
-            id: doc.id,
-            userId: data.userId || '',
-            type: data.address_type || data.type || 'Home',
-            addressLine: data.address_line || '', // Full address as single string
-            street: data.address_line || data.street || '', // Use address_line as street for compatibility
-            city: data.city || 'Kolkata', // Default city based on your data
-            state: data.state || 'West Bengal', // Default state
-            pincode: data.pincode || data.zipCode || '',
-            floor: data.floor || '',
-            apartment: data.apartment || '',
-            landmark: data.landmark || '',
-            isDefault: data.isDefault || false,
-            createdAt: data.createdAt || new Date()
-          };
-
-          console.log('Processed address:', address);
-          return address;
-        });
-        console.log('Total processed addresses:', addressesData.length);
-        console.log('Addresses by userId:', addressesData.reduce((acc, addr) => {
-          if (!acc[addr.userId]) acc[addr.userId] = [];
-          acc[addr.userId].push(addr);
-          return acc;
-        }, {}));
-        setAddresses(addressesData);
-      } catch (error) {
-        console.error('Error processing addresses:', error);
-        setAddresses([]);
-      }
-    }, [], (error) => {
-      console.error('Error subscribing to addresses:', error);
-      setAddresses([]);
-    });
-
-    // Subscribe to orders collection with error handling
-    const unsubscribeOrders = subscribeToCollection('orders', (snapshot) => {
-      try {
-        const ordersData = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          userId: doc.data().userId || '',
-          status: doc.data().status || 'pending',
-          ...doc.data(),
-          createdAt: doc.data().createdAt || new Date()
-        }));
-        setOrders(ordersData as Order[]);
-      } catch (error) {
-        console.error('Error processing orders:', error);
-        setOrders([]);
-      }
-    }, [], (error) => {
-      console.error('Error subscribing to orders:', error);
-      setOrders([]);
-    });
-
-    // Subscribe to subscriptions collection with error handling
-    const unsubscribeSubscriptions = subscribeToCollection('subscriptions', (snapshot) => {
-      console.log('Subscriptions snapshot received:', snapshot.docs.length, 'documents');
-      try {
-        const subscriptionsData = snapshot.docs.map((doc) => {
-          const data = doc.data();
-          console.log('Subscription document:', doc.id, data);
-
-          const subscription: Subscription = {
-            id: doc.id,
-            userId: data.userId || data.user_id || data.uid || '', // Support multiple field names
-            isActive: Boolean(data.isActive), // Ensure boolean conversion
-            plan: data.plan || (data.quantity ? `${data.quantity} Jars` : 'Basic'),
-            planType: data.planType || 'interval',
-            totalMonthlyJars: data.totalMonthlyJars,
-            jarsDeliveredThisCycle: data.jarsDeliveredThisCycle,
-            carryForwardJars: data.carryForwardJars,
-            startDate: data.createdAt || data.startDate || new Date(),
-            endDate: data.endDate,
-            nextDelivery: data.nextDelivery || data.nextDeliveryDate,
-            frequency: data.frequency || data.deliveryFrequency || 'weekly',
-            deliveryDays: data.deliveryDays || [],
-            deliverySlot: data.deliverySlot || data.timeSlot,
-            planPrice: data.pricePerDelivery || data.monthlyPrice || 0,
-            totalDeliveries: data.totalDeliveries || 0,
-            remainingDeliveries: data.remainingDeliveries || 0,
-            pausedUntil: data.pausedUntil,
-            createdAt: data.createdAt || new Date(),
-            updatedAt: data.updatedAt
-          };
-
-          console.log(`Subscription ${doc.id} for user ${data.userId || data.user_id || data.uid}:`, {
-            rawIsActive: data.isActive,
-            processedIsActive: subscription.isActive,
-            dataType: typeof data.isActive,
-            plan: subscription.plan,
-            userIdField: data.userId ? 'userId' : data.user_id ? 'user_id' : data.uid ? 'uid' : 'MISSING'
-          });
-          return subscription;
-        });
-        console.log('Total processed subscriptions:', subscriptionsData.length);
-        setSubscriptions(subscriptionsData);
-      } catch (error) {
-        console.error('Error processing subscriptions:', error);
-        setSubscriptions([]);
-      }
-    }, [], (error) => {
-      console.error('Error subscribing to subscriptions:', error);
-      setSubscriptions([]);
-    });
-
-    const timer = setTimeout(() => {
-      setLoading(false);
-      // Debug: Log final state after loading
-      console.log('=== LOADING COMPLETE - FINAL STATE ==');
-      console.log('Total users loaded:', users.length);
-      console.log('Total addresses loaded:', addresses.length);
-      console.log('Users with addresses:', users.map(u => ({
-        id: u.id,
-        name: `${u.firstName} ${u.lastName}`,
-        addressCount: u.addresses?.length || 0
-      })));
-    }, 2000);
-
-    return () => {
-      unsubscribeUsers();
-      unsubscribeAddresses();
-      unsubscribeOrders();
-      unsubscribeSubscriptions();
-      clearTimeout(timer);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Combine users with their addresses and calculate stats
-  useEffect(() => {
-    console.log('Combining users with addresses...');
-    console.log('Users count:', users.length);
-    console.log('Addresses count:', addresses.length);
-
-    const usersWithAddresses = users.map(user => {
-      // First check for addresses from the addresses collection
-      const userAddresses = addresses.filter(addr => {
-        console.log(`Checking address ${addr.id} for user ${user.id}: addr.userId=${addr.userId}`);
-        return addr.userId === user.id;
-      });
-
-      // If no addresses found in collection, use legacy addresses from user document
-      let finalAddresses = userAddresses;
-      if (userAddresses.length === 0 && user.addresses && user.addresses.length > 0) {
-        console.log(`Using legacy addresses for user ${user.id}:`, user.addresses);
-        finalAddresses = user.addresses;
-      }
-
-      console.log(`User ${user.id} (${user.firstName}) has ${finalAddresses.length} addresses:`, finalAddresses);
-
-      const userOrders = orders.filter(order => order.userId === user.id);
-      const completedOrders = userOrders.filter(order => order.status === 'completed');
-      const cancelledOrders = userOrders.filter(order => order.status === 'cancelled');
-
-      // Calculate order dates
-      const orderDates = userOrders.map(order => {
-        if (order.createdAt instanceof Date) return order.createdAt;
-        if (typeof order.createdAt === 'object' && 'toDate' in order.createdAt) return order.createdAt.toDate();
-        if (typeof order.createdAt === 'string') return new Date(order.createdAt);
-        return new Date(0); // fallback to epoch if invalid
-      }).filter(date => !isNaN(date.getTime())); // filter out invalid dates
-
-      const firstOrderDate = orderDates.length > 0 ? new Date(Math.min(...orderDates.map(date => date.getTime()))) : null;
-      const lastOrderDate = orderDates.length > 0 ? new Date(Math.max(...orderDates.map(date => date.getTime()))) : null;
-
-      const userSubscription = subscriptions.find(sub => {
-        console.log(`Comparing subscription userId ${sub.userId} with user id ${user.id}, customerId ${user.customerId}, email ${user.email}`);
-        // Try multiple matching strategies
-        return sub.userId === user.id ||
-          sub.userId === user.customerId ||
-          sub.userId === user.email;
-      });
-
-      console.log(`User ${user.id} (${user.name}):`, {
-        hasSubscription: !!userSubscription,
-        subscriptionId: userSubscription?.id,
-        isActive: userSubscription?.isActive,
-        isActiveType: typeof userSubscription?.isActive,
-        isActiveStrict: userSubscription?.isActive === true,
-        allSubscriptionUserIds: subscriptions.map(s => s.userId),
-        subscriptionData: userSubscription
-      });
-
-      return {
-        ...user,
-        addresses: finalAddresses,
-        orders: userOrders,
-        totalRevenue: completedOrders.length * 37,
-        totalCans: completedOrders.length,
-        // Additional calculated fields
-        firstOrderDate,
-        lastOrderDate,
-        totalCompletedOrders: completedOrders.length,
-        totalCancelledOrders: cancelledOrders.length,
-        subscription: userSubscription || undefined,
-        referralCoins: user.totalCoins || 0,
-        depositMoney: user.wallet_balance || 0,
-      };
-    });
-
-    // Helper function to convert various date formats to Date object
-    const parseDate = (date: Date | { toDate(): Date } | string | undefined): Date => {
-      if (!date) return new Date(0);
-      if (date instanceof Date) return date;
-      if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
-        return date.toDate();
-      }
-      if (typeof date === 'string') {
-        const parsed = new Date(date);
-        return isNaN(parsed.getTime()) ? new Date(0) : parsed;
-      }
-      return new Date(0);
-    };
-
-    // Apply default sorting (newest) on initial combination
-    usersWithAddresses.sort((a, b) => {
-      const dateA = parseDate(a.createdAt);
-      const dateB = parseDate(b.createdAt);
-      return dateB.getTime() - dateA.getTime();
-    });
-
-    console.log('Final users with addresses:', usersWithAddresses);
-    setFilteredUsers(usersWithAddresses);
-  }, [users, addresses, orders, subscriptions]);
-
-  // Filter users based on search term
-  useEffect(() => {
-    if (!searchTerm) {
-      return;
+    if (editingAddress) {
+      setAddrForm(editingAddress);
+      setIsAddrModalOpen(true);
     } else {
-      const filtered = filteredUsers.filter(user => {
-        const basicSearch =
-          user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          user.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          user.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          user.phoneNumber?.includes(searchTerm) ||
-          user.customerId?.toLowerCase().includes(searchTerm.toLowerCase());
-
-        const addressSearch = user.addresses.some(addr =>
-          addr.addressLine?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          addr.street?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          addr.city?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          addr.pincode?.includes(searchTerm) ||
-          addr.type?.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-
-        return basicSearch || addressSearch;
-      });
-      setFilteredUsers(filtered);
+      setAddrForm({ address_type: 'Home' });
     }
-  }, [searchTerm, filteredUsers]);
+  }, [editingAddress]);
 
-  // Add sorting effect
+  const showToast = useCallback((msg: string) => {
+    setToast(msg); setToastShow(true);
+    setTimeout(() => setToastShow(false), 2600);
+  }, []);
+
+  const searchParams = useSearchParams();
+  const customerIdParam = searchParams.get('customerId');
+  const router = useRouter();
+
+  // Handle deep linking from Orders page
   useEffect(() => {
-    let sortedUsers = [...filteredUsers];
-
-    // Helper function to convert various date formats to Date object
-    const parseDate = (date: Date | { toDate(): Date } | string | undefined): Date => {
-      if (!date) return new Date(0);
-      if (date instanceof Date) return date;
-      if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
-        return date.toDate();
-      }
-      if (typeof date === 'string') {
-        const parsed = new Date(date);
-        return isNaN(parsed.getTime()) ? new Date(0) : parsed;
-      }
-      return new Date(0);
-    };
-
-    switch (sortOption) {
-      case 'customerId':
-        sortedUsers.sort((a, b) => a.customerId.localeCompare(b.customerId));
-        break;
-      case 'name':
-        sortedUsers.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-        break;
-      case 'newest':
-        sortedUsers.sort((a, b) => {
-          const dateA = parseDate(a.createdAt);
-          const dateB = parseDate(b.createdAt);
-          return dateB.getTime() - dateA.getTime();
-        });
-        break;
-      case 'oldest':
-        sortedUsers.sort((a, b) => {
-          const dateA = parseDate(a.createdAt);
-          const dateB = parseDate(b.createdAt);
-          return dateA.getTime() - dateB.getTime();
-        });
-        break;
-      case 'orders':
-        sortedUsers.sort((a, b) => b.orders.length - a.orders.length);
-        break;
-      case 'revenue':
-        sortedUsers.sort((a, b) => b.totalRevenue - a.totalRevenue);
-        break;
-      default:
-        break;
+    if (customerIdParam && users.length > 0) {
+      const user = users.find(u => u.customerId === customerIdParam || u.id === customerIdParam);
+      if (user) setSelected(user);
     }
+  }, [customerIdParam, users]);
 
-    setFilteredUsers(sortedUsers);
-  }, [sortOption]);
-
-  const handleUserClick = (user: User) => {
-    setSelectedUser(user);
-    // Ensure all fields are properly initialized in editedUser
-    setEditedUser({
-      ...user,
-      referralCoins: user.referralCoins ?? user.totalCoins,
-      depositMoney: user.depositMoney ?? user.wallet_balance,
+  // Global subscriptions
+  useEffect(() => {
+    const unsub1 = subscribeToCollection('users', snap => {
+      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
     });
-    setEditMode(false);
-    setSubscriptionEditMode(false);
-    setEditedSubscription(user.subscription || null);
-  };
+    const unsub2 = subscribeToCollection('addresses', snap => {
+      setAddresses(snap.docs.map(d => ({ id: d.id, ...d.data() } as Address)));
+    });
+    const unsub3 = subscribeToCollection('orders', snap => {
+      const mapped = snap.docs.map(doc => {
+        const data = doc.data();
+        const totalQty = data.items?.reduce((acc: number, item: any) => acc + (item.quantity || 0), 0) || data.quantity || 1;
+        const totalAmt = data.total || data.amount || data.items?.reduce((acc: number, item: any) => acc + (item.price || item.amount || 0), 0) || (totalQty * 37);
+        
+        const rawAddr = data.deliveryAddress || data.address;
+        const getString = (val: any) => typeof val === 'string' ? val : '';
+        const extractPincode = (str: string) => str.match(/\d{6}/)?.[0] || '';
 
+        let addrFull = '';
+        let addrStreet = '';
+        let addrPincode = '';
+
+        if (typeof rawAddr === 'string') {
+          addrFull = rawAddr;
+          addrStreet = rawAddr;
+          addrPincode = extractPincode(rawAddr);
+        } else if (rawAddr && typeof rawAddr === 'object') {
+          addrFull = getString(rawAddr.fullAddress || rawAddr.full || '');
+          addrStreet = getString(rawAddr.street || rawAddr.area || addrFull);
+          addrPincode = getString(rawAddr.pincode || extractPincode(addrFull));
+        }
+
+        return {
+          id: doc.id,
+          ...data,
+          quantity: totalQty,
+          amount: totalAmt,
+          address: addrFull,
+          raw: data
+        } as Order;
+      });
+      setOrders(mapped);
+    });
+    return () => { unsub1(); unsub2(); unsub3(); };
+  }, []);
+
+  // Per-user order/txn live subscription
   useEffect(() => {
-    const fetchReferralStats = async () => {
-      if (!selectedUser?.customerId) return;
-      try {
-        const { collection, getDocs, query, where } = await import('firebase/firestore');
-        const { db } = await import('@/lib/firebase');
-        const q = query(
-          collection(db, 'users'),
-          where('referredBy', '==', selectedUser.customerId)
-        );
-        const snapshot = await getDocs(q);
-        let pending = 0;
-        let completed = 0;
-        snapshot.forEach(doc => {
-          if (doc.data().isReferralRewarded) {
-            completed++;
-          } else {
-            pending++;
-          }
-        });
-        setSelectedReferralStats({ completed, pending });
-      } catch (error) {
-        console.error('Error fetching referral stats:', error);
-      }
-    };
-    fetchReferralStats();
-  }, [selectedUser?.customerId]);
+    if (!selected) return;
+    const uo = orders.filter(o => o.userId === selected.id);
+    setUserOrders(uo);
+    const unsubTxns = subscribeToCollection('transactions', snap => {
+      setUserTxns(snap.docs.map(d => ({ id: d.id, ...d.data() } as Transaction)));
+    }, [where('userId', '==', selected.id)]);
+    return () => unsubTxns();
+  }, [selected, orders]);
 
-  const handleSave = async () => {
-    if (!editedUser) return;
+  // Whenever user is selected, seed edit fields and jar count
+  useEffect(() => {
+    if (!selected) return;
+    setEditFields({
+      full_name: selected.full_name || selected.name || '',
+      email: selected.email || '',
+      phone: (selected as any).phone || selected.phoneNumber || '',
+      alt_phone: (selected as any).alt_phone || '',
+    });
+    setJarCount(String(selected.jars_occupied || 0));
+    setTab('overview');
+    setExpandedOrder(null);
+    setFStatus(''); setFPay(''); setFSlot(''); setFSearch('');
+    setFtType(''); setFtCat('');
+  }, [selected?.id]);
 
-    setSaving(true);
-    try {
-      const updateData = {
-        customerId: editedUser.customerId,
-        name: editedUser.name,
-        email: editedUser.email,
-        phoneNumber: editedUser.phoneNumber,
-        totalCoins: editedUser.totalCoins,
-        totalShares: editedUser.totalShares,
-        wallet_balance: editedUser.wallet_balance, // Use wallet_balance for user app compatibility
-        jars_occupied: editedUser.jars_occupied, // Use jars_occupied for user app compatibility
-        referralCoins: editedUser.referralCoins,
-        depositMoney: editedUser.depositMoney,
-        role: editedUser.role,
-        updatedAt: new Date()
+  const filteredUsers = users
+    .filter(u => {
+      const q = search.toLowerCase();
+      return !q ||
+        dName(u).toLowerCase().includes(q) ||
+        (u.customerId || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.phoneNumber || '').toLowerCase().includes(q) ||
+        (u.phone || '').toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      // Newest account first
+      const getTs = (u: User) => {
+        const c = u.createdAt as any;
+        if (!c) return 0;
+        if (typeof c.toMillis === 'function') return c.toMillis();
+        if (typeof c.toDate === 'function') return c.toDate().getTime();
+        if (c instanceof Date) return c.getTime();
+        if (typeof c === 'string' || typeof c === 'number') return new Date(c).getTime();
+        return 0;
       };
+      return getTs(b) - getTs(a);
+    });
 
-      await updateDocument('users', editedUser.id, updateData);
+  // ── Overview helpers ──
+  const oDelivered = (ords: Order[]) => ords.filter(o => o.status === 'delivered' || o.status === 'completed');
+  const oCancelled = (ords: Order[]) => ords.filter(o => o.status === 'cancelled');
+  const oRevenue   = (ords: Order[]) => oDelivered(ords).reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
 
-      if (selectedUser) {
-        if (editedUser.wallet_balance !== selectedUser.wallet_balance) {
-          const change = editedUser.wallet_balance - selectedUser.wallet_balance;
-          await logActivity({
-            action: 'WALLET_UPDATED',
-            actor: 'ADMIN',
-            actorId: currentUser?.uid || 'unknown',
-            actorName: currentUser?.email || 'Admin',
-            targetId: editedUser.id,
-            details: `Admin ${change > 0 ? 'added' : 'deducted'} ₹${Math.abs(change)} ${change > 0 ? 'to' : 'from'} wallet. New balance: ₹${editedUser.wallet_balance}`
-          });
-        }
-        if (editedUser.jars_occupied !== selectedUser.jars_occupied) {
-          await logActivity({
-            action: 'JAR_UPDATED',
-            actor: 'ADMIN',
-            actorId: currentUser?.uid || 'unknown',
-            actorName: currentUser?.email || 'Admin',
-            targetId: editedUser.id,
-            details: `Admin updated hold jars from ${selectedUser.jars_occupied} to ${editedUser.jars_occupied}`
-          });
-        }
-        if (editedUser.role !== selectedUser.role) {
-          await logActivity({
-            action: 'ROLE_UPDATED',
-            actor: 'ADMIN',
-            actorId: currentUser?.uid || 'unknown',
-            actorName: currentUser?.email || 'Admin',
-            targetId: editedUser.id,
-            details: `Admin changed role from ${selectedUser.role || 'user'} to ${editedUser.role || 'user'}`
-          });
-        }
-      }
-
-      setSelectedUser(editedUser);
-      setEditMode(false);
-
-      // Show success message with real-time update info
-      const message = selectedUser && (editedUser.jars_occupied !== selectedUser.jars_occupied || editedUser.wallet_balance !== selectedUser.wallet_balance)
-        ? 'User details updated successfully! Hold Jars and Wallet Balance changes will reflect in the user app immediately.'
-        : 'User details updated successfully!';
-      alert(message);
-    } catch (error) {
-      console.error('Error updating user:', error);
-      alert('Error updating user details. Please try again.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!selectedUser) return;
-
-    const confirmDelete = window.confirm(
-      `Are you sure you want to delete user ${selectedUser.name || `${selectedUser.firstName} ${selectedUser.lastName}`}? This action cannot be undone.`
-    );
-
-    if (!confirmDelete) return;
-
+  // ── Handle wallet adjustment ──
+  const handleWalletAdj = async () => {
+    if (!selected) return;
+    const amt = parseInt(adjAmt);
+    if (!amt || amt <= 0) { showToast('Enter a valid amount'); return; }
+    const isCredit = adjType === 'Credit';
+    const newBal = (selected.wallet_balance || 0) + (isCredit ? amt : -amt);
     setSaving(true);
     try {
-      await deleteDocument('users', selectedUser.id);
-      
-      await logActivity({
-        action: 'USER_DELETED',
-        actor: 'ADMIN',
-        actorId: currentUser?.uid || 'unknown',
-        actorName: currentUser?.email || 'Admin',
-        targetId: selectedUser.id,
-        details: `Admin deleted user ${selectedUser.name || `${selectedUser.firstName} ${selectedUser.lastName}`.trim()}`
+      await updateDocument('users', selected.id, { wallet_balance: newBal });
+      await addDocument('transactions', {
+        userId: selected.id, customerId: selected.customerId,
+        type: isCredit ? 'credit' : 'debit', amount: amt,
+        category: 'admin_adjustment', note: adjReason || 'Admin adjustment',
+        createdAt: serverTimestamp(),
       });
-
-      setSelectedUser(null);
-      alert('User deleted successfully!');
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      alert('Error deleting user. Please try again.');
-    } finally {
-      setSaving(false);
-    }
+      showToast(`${adjType} ₹${amt} applied & logged`);
+      setAdjAmt(''); setAdjReason('');
+    } catch (e) { showToast('Error — check console'); }
+    setSaving(false);
   };
 
-  const handleCall = (phoneNumber: string) => {
-    window.open(`tel:${phoneNumber}`, '_self');
-  };
-
-  const handleNavigation = (address: Address) => {
-    if (address && (address.addressLine || address.street)) {
-      const fullAddress = address.addressLine || `${address.street}, ${address.city}, ${address.state}`;
-      const encodedAddress = encodeURIComponent(fullAddress);
-      window.open(`https://www.google.com/maps/search/?api=1&query=${encodedAddress}`, '_blank');
-    }
-  };
-
-  // Subscription Management Functions
-  const handleSubscriptionSave = async () => {
-    if (!editedSubscription || !selectedUser) return;
-
+  // ── Handle jar correction ──
+  const handleJarCorrection = async () => {
+    if (!selected) return;
+    const count = parseInt(jarCount);
+    if (isNaN(count) || count < 0) { showToast('Enter a valid jar count'); return; }
     setSaving(true);
     try {
-      if (editedSubscription.id) {
-        // Update existing subscription
-        const updateData = {
-          isActive: editedSubscription.isActive,
-          plan: editedSubscription.plan,
-          frequency: editedSubscription.frequency,
-          planPrice: editedSubscription.planPrice,
-          nextDelivery: editedSubscription.nextDelivery,
-          deliverySlot: editedSubscription.deliverySlot,
-          totalDeliveries: editedSubscription.totalDeliveries,
-          remainingDeliveries: editedSubscription.remainingDeliveries,
-          pausedUntil: editedSubscription.pausedUntil,
-          updatedAt: new Date()
-        };
-        await updateDocument('subscriptions', editedSubscription.id, updateData);
+      await updateDocument('users', selected.id, { jars_occupied: count });
+      await addDocument('activity_logs', {
+        action: 'jar_correction', userId: selected.id,
+        adminId: userData?.id, oldValue: selected.jars_occupied,
+        newValue: count, reason: jarReason || 'Manual correction',
+        createdAt: serverTimestamp(),
+      });
+      showToast('Jar count updated & audit logged');
+      setJarReason('');
+    } catch (e) { showToast('Error — check console'); }
+    setSaving(false);
+  };
+
+  // ── Handle profile save — writes exact iOS app user schema ──
+  const handleProfileSave = async () => {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      // Only write fields that the iOS app user doc schema uses
+      const data: Record<string, unknown> = {};
+      if (editFields.full_name !== undefined) data.full_name = editFields.full_name;
+      if ((editFields as any).email !== undefined) data.email = (editFields as any).email;
+      if ((editFields as any).phone !== undefined) data.phone = (editFields as any).phone;
+      if ((editFields as any).alt_phone !== undefined) data.alt_phone = (editFields as any).alt_phone;
+      await updateDocument('users', selected.id, data);
+      showToast('Profile saved to Firestore');
+    } catch (e) { showToast('Error saving profile'); }
+    setSaving(false);
+  };
+
+  // ── Handle Address Default ──
+  const handleSetDefaultAddress = async (addrId: string) => {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      const batch = writeBatch(db);
+      const userAddrs = addresses.filter(a => a.userId === selected.id);
+      userAddrs.forEach(a => {
+        batch.update(doc(db, 'addresses', a.id!), { isDefault: a.id === addrId });
+      });
+      await batch.commit();
+      showToast('Default address updated');
+    } catch (e) { showToast('Error updating default address'); }
+    setSaving(false);
+  };
+
+  // ── Handle Address Save — writes exact iOS app address schema (AppContext.jsx saveAddress) ──
+  const handleAddressSave = async () => {
+    if (!selected) return;
+    if (!addrForm.address_type || !addrForm.address_line) { showToast('Address type and address line are required'); return; }
+    setSaving(true);
+    try {
+      const now = serverTimestamp();
+      // Build the exact Firestore payload matching iOS AppContext saveAddress
+      const payload: Record<string, unknown> = {
+        address_type: addrForm.address_type,
+        address_line: addrForm.address_line,
+        plus_code: addrForm.plus_code || null,
+        house_no: addrForm.house_no || null,
+        floor_no: addrForm.floor_no || null,
+        landmark: addrForm.landmark || null,
+        lift_available: addrForm.lift_available || null,
+        be_aware_of_dogs: addrForm.be_aware_of_dogs ?? false,
+        latitude: addrForm.latitude || null,
+        longitude: addrForm.longitude || null,
+        isDefault: addrForm.isDefault ?? false,
+        userId: selected.id,
+        updatedAt: now,
+      };
+      if (editingAddress?.id) {
+        await updateDocument('addresses', editingAddress.id, payload);
+        // If setting as default, clear others first
+        if (payload.isDefault) {
+          const batch = writeBatch(db);
+          addresses.filter(a => a.userId === selected.id && a.id !== editingAddress.id)
+            .forEach(a => batch.update(doc(db, 'addresses', a.id!), { isDefault: false }));
+          await batch.commit();
+        }
+        showToast('Address updated in Firestore');
       } else {
-        // Create new subscription
-        const newSubscription = {
-          userId: selectedUser.id,
-          isActive: editedSubscription.isActive,
-          plan: editedSubscription.plan,
-          frequency: editedSubscription.frequency,
-          planPrice: editedSubscription.planPrice,
-          nextDelivery: editedSubscription.nextDelivery,
-          deliverySlot: editedSubscription.deliverySlot,
-          totalDeliveries: editedSubscription.totalDeliveries,
-          remainingDeliveries: editedSubscription.remainingDeliveries,
-          startDate: new Date(),
-          createdAt: new Date()
-        };
-        await addDocument('subscriptions', newSubscription);
+        const userAddrs = addresses.filter(a => a.userId === selected.id);
+        const isFirstAddress = userAddrs.length === 0;
+        // Clear existing defaults if adding a new default
+        if (isFirstAddress || payload.isDefault) {
+          const batch = writeBatch(db);
+          userAddrs.forEach(a => batch.update(doc(db, 'addresses', a.id!), { isDefault: false }));
+          await batch.commit();
+          payload.isDefault = true;
+        }
+        await addDocument('addresses', { ...payload, createdAt: now });
+        showToast('New address added to Firestore');
       }
-
-      setSubscriptionEditMode(false);
-      alert('Subscription updated successfully!');
-    } catch (error) {
-      console.error('Error updating subscription:', error);
-      alert('Error updating subscription. Please try again.');
-    } finally {
-      setSaving(false);
-    }
+      setIsAddrModalOpen(false);
+      setEditingAddress(null);
+    } catch (e) { showToast('Error saving address'); }
+    setSaving(false);
   };
 
-  const handleSubscriptionPause = async () => {
-    if (!selectedUser?.subscription) return;
-
-    const pauseUntil = prompt('Pause subscription until (YYYY-MM-DD):');
-    if (!pauseUntil) return;
-
+  // ── Handle Address Delete ──
+  const handleAddressDelete = async (addrId: string) => {
+    if (!confirm('Delete this address?')) return;
     setSaving(true);
     try {
-      await updateDocument('subscriptions', selectedUser.subscription.id, {
-        isActive: false,
-        pausedUntil: new Date(pauseUntil),
-        updatedAt: new Date()
-      });
-      alert('Subscription paused successfully!');
-    } catch (error) {
-      console.error('Error pausing subscription:', error);
-      alert('Error pausing subscription. Please try again.');
-    } finally {
-      setSaving(false);
-    }
+      await deleteDocument('addresses', addrId);
+      showToast('Address deleted');
+    } catch (e) { showToast('Error deleting address'); }
+    setSaving(false);
   };
 
-  const handleSubscriptionDelete = async () => {
-    if (!selectedUser?.subscription) return;
-
-    const confirmDelete = window.confirm(
-      `Are you sure you want to delete the subscription for ${selectedUser.name}? This action cannot be undone.`
+  // ── Permanently delete a user account + their addresses ──
+  const handleDeleteUser = async (user: User) => {
+    const confirmed = confirm(
+      `⚠️ PERMANENT DELETE\n\nThis will delete "${dName(user)}" (${user.customerId}) and all their saved addresses from Firestore.\n\nThis cannot be undone. Continue?`
     );
-
-    if (!confirmDelete) return;
-
+    if (!confirmed) return;
     setSaving(true);
     try {
-      await deleteDocument('subscriptions', selectedUser.subscription.id);
-      alert('Subscription deleted successfully!');
-    } catch (error) {
-      console.error('Error deleting subscription:', error);
-      alert('Error deleting subscription. Please try again.');
-    } finally {
-      setSaving(false);
-    }
+      // Delete all addresses belonging to this user
+      const userAddrs = addresses.filter(a => a.userId === user.id);
+      await Promise.all(userAddrs.map(a => deleteDocument('addresses', a.id!)));
+      // Delete the user doc itself
+      await deleteDocument('users', user.id);
+      // Deselect if this was the active user
+      if (selected?.id === user.id) setSelected(null);
+      showToast(`User "${dName(user)}" permanently deleted`);
+    } catch (e) { showToast('Error deleting user — check console'); console.error(e); }
+    setSaving(false);
   };
-
-  if (loading) {
+  const filteredOrders = userOrders.filter(o => {
+    const s = o.status?.toLowerCase();
+    const fs = fStatus.toLowerCase();
     return (
-      <LoadingSpinner>
-        <FiRefreshCw size={40} />
-      </LoadingSpinner>
+      (!fStatus || s === fs || (fStatus === 'Delivered' && s === 'completed') || s?.includes(fs)) &&
+      (!fPay || (o.paymentMethod || '').toLowerCase() === fPay.toLowerCase()) &&
+      (!fSlot || String(o.slot) === fSlot) &&
+      (!fSearch || o.id.toLowerCase().includes(fSearch.toLowerCase()))
     );
+  });
+
+  const filteredTxns = userTxns.filter(t =>
+    (!ftType || t.type === ftType) &&
+    (!ftCat || t.category === ftCat)
+  );
+
+  if (!selected && filteredUsers.length > 0 && users.length > 0) {
+    // auto-select first user
+    setTimeout(() => setSelected(filteredUsers[0]), 0);
   }
 
-  return (
-    <Container>
-      <Header>
-        <TitleGroup>
-          <Logo
-            src="/logo.jpeg"
-            alt="Hydrant Logo"
-            width={48}
-            height={48}
-          />
-          <PageTitle>
-            User <span>Management</span>
-          </PageTitle>
-        </TitleGroup>
-        <Controls>
-          <SearchWrapper>
-            <SearchInput
-              type="text"
-              placeholder="Search by name, email, phone, customer ID, or address..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            <FiSearch style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-          </SearchWrapper>
-          <SelectInput value={sortOption} onChange={(e) => setSortOption(e.target.value)}>
-            <option value="newest">Newest Users</option>
-            <option value="oldest">Oldest Users</option>
-            <option value="customerId">Customer ID</option>
-            <option value="name">Name</option>
-            <option value="orders">Most Orders</option>
-            <option value="revenue">Highest Revenue</option>
-          </SelectInput>
-        </Controls>
-      </Header>
+  const selPalette = selected ? palette(selected.customerId || selected.id) : AVATAR_PALETTES[0];
 
-      {/* Debug Panel - Remove in production */}
-      <div style={{
-        background: '#f8f9fa',
-        border: '1px solid #dee2e6',
-        padding: '12px',
-        borderRadius: '8px',
-        marginBottom: '20px',
-        fontSize: '13px',
-        fontFamily: 'monospace',
-        color: '#495057'
-      }}>
-        <strong>🔍 Debug Info:</strong><br />
-        Users loaded: {users.length} |
-        Addresses loaded: {addresses.length} |
-        Subscriptions loaded: {subscriptions.length} |
-        Combined users: {filteredUsers.length} |
-        Users with addresses: {filteredUsers.filter(u => u.addresses && u.addresses.length > 0).length} |
-        Active subscriptions: {filteredUsers.filter(u => u.subscription?.isActive).length}<br />
-        <details style={{ marginTop: '8px' }}>
-          <summary style={{ cursor: 'pointer', color: '#007bff' }}>View address details</summary>
-          <div style={{ marginTop: '8px', maxHeight: '200px', overflow: 'auto' }}>
-            {addresses.slice(0, 5).map(addr => (
-              <div key={addr.id} style={{ margin: '4px 0', padding: '4px', background: '#fff', borderRadius: '4px' }}>
-                <strong>ID:</strong> {addr.id} | <strong>UserID:</strong> {addr.userId} | <strong>Type:</strong> {addr.type}<br />
-                <strong>Address:</strong> {addr.addressLine || `${addr.street}, ${addr.city}`} | <strong>Default:</strong> {addr.isDefault ? 'Yes' : 'No'}
-              </div>
-            ))}
-            {addresses.length > 5 && <div style={{ fontStyle: 'italic' }}>...and {addresses.length - 5} more addresses</div>}
-          </div>
-        </details>
-        <details style={{ marginTop: '8px' }}>
-          <summary style={{ cursor: 'pointer', color: '#28a745' }}>View subscription details</summary>
-          <div style={{ marginTop: '8px', maxHeight: '200px', overflow: 'auto' }}>
-            {subscriptions.slice(0, 5).map(sub => (
-              <div key={sub.id} style={{
-                margin: '4px 0',
-                padding: '4px',
-                background: sub.isActive ? '#d4edda' : '#f8d7da',
-                borderRadius: '4px',
-                border: `1px solid ${sub.isActive ? '#28a745' : '#dc3545'}`
-              }}>
-                <strong>ID:</strong> {sub.id} | <strong>UserID:</strong> {sub.userId} |
-                <strong style={{ color: sub.isActive ? '#28a745' : '#dc3545' }}>Active:</strong> {sub.isActive ? 'YES' : 'NO'}<br />
-                <strong>Plan:</strong> {sub.plan} | <strong>Frequency:</strong> {sub.frequency}
-              </div>
-            ))}
-            {subscriptions.length > 5 && <div style={{ fontStyle: 'italic' }}>...and {subscriptions.length - 5} more subscriptions</div>}
-          </div>
-        </details>
-      </div>
+  // ── Render tabs ──
+  const renderOverview = () => {
+    const del = oDelivered(userOrders).length;
+    const can = oCancelled(userOrders).length;
+    const tot = userOrders.length;
+    const rev = oRevenue(userOrders);
+    const walletRev = oDelivered(userOrders).filter(o => o.paymentMethod === 'wallet').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
+    const cashRev   = oDelivered(userOrders).filter(o => o.paymentMethod === 'cash').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
+    const upiRev    = oDelivered(userOrders).filter(o => o.paymentMethod !== 'wallet' && o.paymentMethod !== 'cash').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
+    const recent = userOrders.slice(0, 4);
+    return (
+      <>
+        <Metrics $cols={4}>
+          <Metric><ML>Total orders</ML><MV>{tot}</MV><MSub>All time</MSub></Metric>
+          <Metric><ML>Delivered</ML><MV $color="var(--color-text-success)">{del}</MV><MSub>{tot ? Math.round(del / tot * 100) : 0}% success rate</MSub></Metric>
+          <Metric><ML>Cancelled</ML><MV $color="var(--color-text-danger)">{can}</MV><MSub>{tot ? Math.round(can / tot * 100) : 0}% cancel rate</MSub></Metric>
+          <Metric><ML>Revenue</ML><MV $color="var(--color-text-success)">₹{rev}</MV><MSub>Delivered only</MSub></Metric>
+        </Metrics>
 
-      <InfoBox>
-        <FiInfo />
-        <div>
-          <strong>Multi-Collection User Management:</strong> Data fetched from separate Firebase collections.
-          <br />• User details from &apos;users&apos; collection (name, phone, email, wallet, hold jars)
-          <br />• Address data from &apos;addresses&apos; collection (multiple addresses with types)
-          <br />• Subscription data from &apos;subscriptions&apos; collection (plan, frequency, delivery details)
-          <br />• <strong>Hold Jars:</strong> Track user&apos;s current jar inventory - updates reflect in user app
-          <br />• Search across all user information and saved addresses
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <SectionTitle>Order breakdown</SectionTitle>
+            <Bar label="Delivered" val={del} total={tot} color="#3b6d11" />
+            <Bar label="Cancelled" val={can} total={tot} color="#a32d2d" />
+            <Bar label="Other" val={tot - del - can} total={tot} color="#185fa5" />
+          </div>
+          <div>
+            <SectionTitle>Payment split</SectionTitle>
+            <Bar label="Wallet" val={walletRev} total={rev} color="#085041" suffix={`₹${walletRev}`} />
+            <Bar label="UPI" val={upiRev} total={rev} color="#3C3489" suffix={`₹${upiRev}`} />
+            <Bar label="Cash" val={cashRev} total={rev} color="#633806" suffix={`₹${cashRev}`} />
+          </div>
         </div>
-      </InfoBox>
 
-      <UserGrid>
-        {filteredUsers.length > 0 ? (
-          filteredUsers.map((user, index) => {
-            const defaultAddress = user.addresses.find(addr => addr.isDefault) || user.addresses[0];
-            return (
-              <Card
-                key={user.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-                onClick={() => handleUserClick(user)}
-              >
-                <CardHeader>
-                  <UserIdentity>
-                    <h3>{user.name || `${user.firstName} ${user.lastName}`.trim()}</h3>
-                    <p><FiMail size={14} /> {user.email}</p>
-                    <p><FiPhone size={14} /> {user.phoneNumber}</p>
-                    <p style={{ color: '#6366f1', fontWeight: '600' }}>ID: {user.customerId}</p>
-                  </UserIdentity>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-                    <StatusBadge $active={user.subscription?.isActive === true}>
-                      {user.subscription?.isActive === true ? 'Active' : 'Inactive'}
-                    </StatusBadge>
-                  </div>
+        <SectionTitle>Recent orders</SectionTitle>
+        <Table>
+          <thead><tr>
+            <Th>Order ID</Th><Th>Date</Th><Th>Jars</Th><Th>Amount</Th><Th>Payment</Th><Th>Status</Th>
+          </tr></thead>
+          <tbody>
+            {recent.length === 0 && <tr><Td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)' }}>No orders yet</Td></tr>}
+            {recent.map(o => (
+              <tr key={o.id} onClick={() => router.push(`/admin/orders?orderId=${o.id}`)} style={{ cursor: 'pointer' }}>
+                <Td><MonoBadge>{o.id.slice(-8)}</MonoBadge></Td>
+                <Td style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{fmt(o.createdAt)}</Td>
+                <Td>{o.quantity ?? '—'}</Td>
+                <Td>₹{o.totalAmount || o.amount || 0}</Td>
+                <Td><IBadge cls={payBadge(o.paymentMethod)}>{o.paymentMethod || '—'}</IBadge></Td>
+                <Td><IBadge cls={statusBadge(o.status)}>{o.status}</IBadge></Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </>
+    );
+  };
 
-                </CardHeader>
+  const renderProfile = () => {
+    const userAddrs = addresses.filter(a => a.userId === selected?.id);
+    return (
+      <>
+        <ProfileGrid>
+          {[
+            { label: 'Full Name', key: 'full_name' },
+            { label: 'Email', key: 'email' },
+            { label: 'Primary Phone', key: 'phone' },
+            { label: 'Alt Phone', key: 'alt_phone' },
+            { label: 'Customer ID', key: 'customerId', disabled: true },
+            { label: 'Joined', key: '_joined', disabled: true },
+          ].map(f => (
+            <ProfileField key={f.label}>
+              <label>{f.label}</label>
+              {f.key === '_joined'
+                ? <input value={fmt(selected?.createdAt)} disabled />
+                : f.disabled
+                  ? <input value={String((selected as unknown as Record<string, unknown>)?.[f.key] ?? '')} disabled />
+                  : <input
+                      value={String((editFields as Record<string, unknown>)[f.key] ?? '')}
+                      onChange={e => setEditFields(p => ({ ...p, [f.key]: e.target.value }))}
+                    />
+              }
+            </ProfileField>
+          ))}
+        </ProfileGrid>
 
-                <KeyStatsRow>
-                  <StatPill color="#8e2de2">
-                    <span className="label">Wallet</span>
-                    <span className="value">₹{user.wallet_balance || 0}</span>
-                  </StatPill>
-                  <StatPill color="#10b981">
-                    <span className="label">Hold Jars</span>
-                    <span className="value">{user.jars_occupied || 0}</span>
-                  </StatPill>
-                  <StatPill color="#3b82f6">
-                    <span className="label">Orders</span>
-                    <span className="value">{user.orders.length}</span>
-                  </StatPill>
-                  <StatPill color="#f59e0b">
-                    <span className="label">Revenue</span>
-                    <span className="value">₹{user.totalRevenue}</span>
-                  </StatPill>
-                </KeyStatsRow>
-
-                {defaultAddress && (
-                  <CardFooter>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <FiMapPin size={14} style={{ color: '#64748b' }} />
-                      <span style={{ fontSize: '0.875rem', color: '#64748b' }}>
-                        {defaultAddress.type}: {defaultAddress.addressLine || `${defaultAddress.city}, ${defaultAddress.pincode}`}
-                        {defaultAddress.isDefault && (
-                          <span style={{
-                            background: '#e0e7ff',
-                            color: '#4f46e5',
-                            fontSize: '0.7rem',
-                            padding: '2px 6px',
-                            borderRadius: '9999px',
-                            fontWeight: '600',
-                            marginLeft: '0.5rem'
-                          }}>
-                            DEFAULT
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <FiArrowRight size={16} style={{ color: '#94a3b8' }} />
-                  </CardFooter>
+        <div style={{ display: 'flex', gap: 8, marginTop: 15 }}>
+          <BtnXS $variant="info" as="a" href={`tel:${(selected as any)?.phone || selected?.phoneNumber}`} style={{ flex: 1, textDecoration: 'none', justifyContent: 'center' }}>
+            <FiPhoneCall size={14} /> Call Phone
+          </BtnXS>
+          <BtnXS $variant="success" as="a" href={`https://wa.me/${((selected as any)?.phone || selected?.phoneNumber || '').replace(/\D/g, '')}`} target="_blank" style={{ flex: 1, textDecoration: 'none', justifyContent: 'center', background: '#25D366', color: 'white', borderColor: '#25D366' }}>
+            <FiMessageCircle size={14} /> WhatsApp
+          </BtnXS>
+        </div>
+        <SectionTitle>Delivery addresses</SectionTitle>
+        {userAddrs.length === 0 && <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13 }}>No addresses found.</div>}
+        {userAddrs.map((a, i) => (
+          <AddrCard key={a.id || i} $default={!!a.isDefault}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{a.address_type}</div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>{a.address_line}</div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+                {a.isDefault && <span style={{ background: 'var(--color-background-success)', color: 'var(--color-text-success)', borderRadius: 12, fontSize: 10, padding: '2px 8px' }}>Default</span>}
+                {a.plus_code && (
+                  <span title="Plus Code — Used for pinpoint delivery accuracy" style={{ background: '#E3F2FD', color: '#1565C0', borderRadius: 12, fontSize: 10, padding: '2px 8px', fontFamily: 'monospace', fontWeight: 600 }}>
+                    📍 {a.plus_code}
+                  </span>
                 )}
-
-                {user.addresses.length > 0 && (
-                  <div style={{ marginTop: '20px' }}>
-                    <h4 style={{ margin: '0 0 10px 0', color: '#666', fontSize: '0.9rem' }}>
-                      Saved Addresses ({user.addresses.length})
-                    </h4>
-                    {user.addresses.slice(0, 2).map((address) => (
-                      <div key={address.id} style={{ background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: '8px', padding: '15px', marginBottom: '10px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                          <div style={{ background: '#8e2de2', color: 'white', padding: '4px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '600', textTransform: 'uppercase', display: 'inline-block', marginBottom: '8px' }}>
-                            {address.type}
-                          </div>
-                          {address.isDefault && (
-                            <span style={{
-                              background: '#28a745',
-                              color: 'white',
-                              fontSize: '0.7rem',
-                              padding: '1px 4px',
-                              borderRadius: '3px',
-                              fontWeight: '600',
-                              marginLeft: '6px'
-                            }}>
-                              DEFAULT
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ color: '#495057', fontSize: '0.9rem', lineHeight: '1.4' }}>
-                          {address.addressLine || `${address.street}, ${address.city}, ${address.state} - ${address.pincode}`}
-                        </div>
-                      </div>
-                    ))}
-                    {user.addresses.length > 2 && (
-                      <div style={{ color: '#666', fontSize: '0.85rem', fontStyle: 'italic' }}>
-                        +{user.addresses.length - 2} more addresses
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div style={{ color: '#8e2de2', fontSize: '0.8rem', textAlign: 'center', marginTop: '15px', opacity: '0.7', transition: 'all 0.3s ease' }}>
-                  👆 Click to view details &amp; manage user
-                </div>
-              </Card>
-            );
-          })
-        ) : (
-          <EmptyState>
-            <FiUsers size={48} style={{ marginBottom: '16px' }} />
-            <h3>No users found</h3>
-            <p>No users match your search criteria</p>
-          </EmptyState>
-        )}
-      </UserGrid>
-
-      {/* User Detail Modal */}
-      <AnimatePresence>
-        {selectedUser && (
-          <ModalOverlay
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setSelectedUser(null)}
-          >
-            <ModalContent
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <CloseButton onClick={() => setSelectedUser(null)}>
-                <FiX />
-              </CloseButton>
-
-              <ModalHeader>
-                <ModalTitle>
-                  {selectedUser.name || `${selectedUser.firstName} ${selectedUser.lastName}`.trim()}
-                </ModalTitle>
-                <ModalSubtitle>
-                  <div><FiMail /> {selectedUser.email}</div>
-                  <div><FiPhone /> {selectedUser.phoneNumber}</div>
-                  <div><FiUsers /> {selectedUser.customerId}</div>
-                </ModalSubtitle>
-              </ModalHeader>
-
-              <ModalBody>
-                <DeepStatsGrid>
-                  <DeepStatCard color="#8e2de2">
-                    <FiDollarSign className="icon" />
-                    <h5>Total Revenue</h5>
-                    <div className="value">₹{selectedUser.totalRevenue}</div>
-                    <div className="sub">Total earnings from completed orders</div>
-                  </DeepStatCard>
-
-                  <DeepStatCard color="#10b981">
-                    <FiPackage className="icon" />
-                    <h5>Hold Jars</h5>
-                    <div className="value">{selectedUser.jars_occupied || 0}</div>
-                    <div className="sub">Currently held by user</div>
-                  </DeepStatCard>
-
-                  <DeepStatCard color="#3b82f6">
-                    <FiActivity className="icon" />
-                    <h5>Total Orders</h5>
-                    <div className="value">{selectedUser.orders.length}</div>
-                    <div className="sub">All orders placed</div>
-                  </DeepStatCard>
-
-                  <DeepStatCard color="#f59e0b">
-                    <FiClock className="icon" />
-                    <h5>Wallet Balance</h5>
-                    <div className="value">₹{selectedUser.wallet_balance || 0}</div>
-                    <div className="sub">Available for orders</div>
-                  </DeepStatCard>
-                </DeepStatsGrid>
-
-                <UserDetailGrid>
-                  <InfoGrid>
-                    <div style={{ flex: 2 }}>
-                      <SectionTitle>
-                        <FiUsers /> Personal Information
-                      </SectionTitle>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-                        <div>
-                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Customer ID</div>
-                          <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b', fontFamily: 'monospace' }}>
-                            {selectedUser.customerId}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Join Date</div>
-                          <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                            {formatDate(selectedUser.createdAt)}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ marginBottom: '1.5rem' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Full Name</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                          {editMode ? (
-                            <EditableField
-                              value={editedUser?.name || ''}
-                              onChange={(e) => setEditedUser({ ...editedUser!, name: e.target.value })}
-                            />
-                          ) : (
-                            selectedUser.name || `${selectedUser.firstName || ''} ${selectedUser.lastName || ''}`.trim()
-                          )}
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-                        <div>
-                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Phone</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            {editMode ? (
-                              <EditableField
-                                value={editedUser?.phoneNumber || ''}
-                                onChange={(e) => setEditedUser({ ...editedUser!, phoneNumber: e.target.value })}
-                              />
-                            ) : (
-                              <>
-                                <span style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>{selectedUser.phoneNumber}</span>
-                                <Button
-                                  variant="secondary"
-                                  onClick={() => handleCall(selectedUser.phoneNumber)}
-                                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                                >
-                                  <FiPhone size={12} /> Call
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Email</div>
-                          <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                            {editMode ? (
-                              <EditableField
-                                value={editedUser?.email || ''}
-                                onChange={(e) => setEditedUser({ ...editedUser!, email: e.target.value })}
-                              />
-                            ) : (
-                              selectedUser.email
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-                        <div>
-                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Role</div>
-                          <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                            {editMode && userData?.role === 'superadmin' ? (
-                              <SelectInput
-                                value={editedUser?.role || 'user'}
-                                onChange={(e) => setEditedUser({ ...editedUser!, role: e.target.value })}
-                                style={{ width: '100%', padding: '8px', fontSize: '1rem' }}
-                              >
-                                <option value="user">User</option>
-                                <option value="support">Support</option>
-                                <option value="manager">Manager</option>
-                                <option value="admin">Admin</option>
-                                <option value="superadmin">Super Admin</option>
-                              </SelectInput>
-                            ) : (
-                              <span style={{ textTransform: 'capitalize' }}>{selectedUser.role || 'User'}</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ flex: 3 }}>
-                      <SectionTitle>
-                        <FiStar /> Wallet & Business
-                      </SectionTitle>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                        <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Total Coins</div>
-                          <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b' }}>
-                            {editMode ? (
-                              <EditableField
-                                type="number"
-                                value={editedUser?.totalCoins || 0}
-                                onChange={(e) => setEditedUser({ ...editedUser!, totalCoins: parseInt(e.target.value) || 0 })}
-                              />
-                            ) : (
-                              selectedUser.totalCoins || 0
-                            )}
-                          </div>
-                        </div>
-
-                        <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Wallet Balance</div>
-                          <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', display: 'flex', alignItems: 'center' }}>
-                            ₹
-                            {editMode ? (
-                              <EditableField
-                                type="number"
-                                value={editedUser?.wallet_balance || 0}
-                                onChange={(e) => setEditedUser({ ...editedUser!, wallet_balance: parseInt(e.target.value) || 0 })}
-                                style={{ marginLeft: '4px' }}
-                              />
-                            ) : (
-                              selectedUser.wallet_balance || 0
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Referral Coins</div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b' }}>
-                          {editMode ? (
-                            <EditableField
-                              type="number"
-                              value={editedUser?.referralCoins || 0}
-                              onChange={(e) => setEditedUser({ ...editedUser!, referralCoins: parseInt(e.target.value) || 0 })}
-                            />
-                          ) : (
-                            selectedUser.referralCoins || 0
-                          )}
-                        </div>
-                      </div>
-
-
-
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Deposit Money</div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', display: 'flex', alignItems: 'center' }}>
-                          ₹
-                          {editMode ? (
-                            <EditableField
-                              type="number"
-                              value={editedUser?.depositMoney || 0}
-                              onChange={(e) => setEditedUser({ ...editedUser!, depositMoney: parseInt(e.target.value) || 0 })}
-                              style={{ marginLeft: '4px' }}
-                            />
-                          ) : (
-                            selectedUser.depositMoney || 0
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Completed Referrals</div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#10b981' }}>
-                          {selectedReferralStats.completed}
-                        </div>
-                      </div>
-
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Pending Referrals</div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#f59e0b' }}>
-                          {selectedReferralStats.pending}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Hold Jars</div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b' }}>
-                          {editMode ? (
-                            <EditableField
-                              type="number"
-                              value={editedUser?.jars_occupied || 0}
-                              onChange={(e) => setEditedUser({ ...editedUser!, jars_occupied: parseInt(e.target.value) || 0 })}
-                            />
-                          ) : (
-                            selectedUser.jars_occupied || 0
-                          )}
-                        </div>
-                      </div>
-
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Subscription</div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: selectedUser.subscription?.isActive === true ? '#10b981' : '#dc2626' }}>
-                          {selectedUser.subscription?.isActive === true ? 'Active' : 'Inactive'}
-                        </div>
-                      </div>
-                    </div>
-                </InfoGrid>
-              </UserDetailGrid>
-
-              <div style={{ marginTop: '2rem' }}>
-                <SectionTitle>
-                  <FiPackage /> Order Statistics
-                </SectionTitle>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Total Completed Orders</div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#28a745' }}>
-                      {selectedUser.totalCompletedOrders || 0}
-                    </div>
-                  </div>
-
-                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Total Cancelled Orders</div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#dc3545' }}>
-                      {selectedUser.totalCancelledOrders || 0}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>First Order Date</div>
-                    <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#17a2b8' }}>
-                      {selectedUser.firstOrderDate ? formatDate(selectedUser.firstOrderDate) : 'No orders'}
-                    </div>
-                  </div>
-
-                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Last Order Date</div>
-                    <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#17a2b8' }}>
-                      {selectedUser.lastOrderDate ? formatDate(selectedUser.lastOrderDate) : 'No orders'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: '2rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <SectionTitle>
-                    <FiCheckCircle /> Subscription Management
-                  </SectionTitle>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    {!subscriptionEditMode && selectedUser.subscription && (
-                      <>
-                        <Button
-                          variant="primary"
-                          onClick={() => setSubscriptionEditMode(true)}
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                        >
-                          <FiEdit3 size={12} /> Edit
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={handleSubscriptionPause}
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                        >
-                          <FiXCircle size={12} /> Pause
-                        </Button>
-                        <Button
-                          variant="danger"
-                          onClick={handleSubscriptionDelete}
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                        >
-                          <FiX size={12} /> Delete
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {selectedUser.subscription ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                    <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                      <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Plan / Format</div>
-                      <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#8e2de2' }}>
-                        {selectedUser.subscription.planType === 'monthly' ? 'Monthly Flexible' : selectedUser.subscription.plan}
-                      </div>
-                    </div>
-
-                    {selectedUser.subscription.planType === 'monthly' && (
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Monthly Target Jars</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                          {selectedUser.subscription.totalMonthlyJars || 0}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedUser.subscription.planType === 'monthly' && (
-                      <div style={{ padding: '1rem', background: '#e0f2fe', borderRadius: '8px', border: '1px solid #bae6fd' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#0369a1', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Cycle Progress & Rollover</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#0f172a' }}>
-                          {selectedUser.subscription.jarsDeliveredThisCycle || 0} Delivered
-                          {selectedUser.subscription.carryForwardJars > 0 && <span style={{ color: '#0369a1', marginLeft: 8 }}>(+{selectedUser.subscription.carryForwardJars} Rollover)</span>}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedUser.subscription.frequency && (
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Frequency</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                          {selectedUser.subscription.frequency.charAt(0).toUpperCase() + selectedUser.subscription.frequency.slice(1)}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedUser.subscription.deliveryDays && selectedUser.subscription.deliveryDays.length > 0 && (
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Delivery Days</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                          {selectedUser.subscription.deliveryDays.join(', ')}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedUser.subscription.planPrice && (
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Plan Price</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>₹{selectedUser.subscription.planPrice}</div>
-                      </div>
-                    )}
-
-                    <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                      <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Start Date</div>
-                      <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                        {formatDate(selectedUser.subscription.startDate)}
-                      </div>
-                    </div>
-
-                    {selectedUser.subscription.nextDelivery && (
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Next Delivery</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#28a745' }}>
-                          {formatDate(selectedUser.subscription.nextDelivery)}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedUser.subscription.deliverySlot && (
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Delivery Slot</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                          {selectedUser.subscription.deliverySlot}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedUser.subscription.totalDeliveries && (
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Total Deliveries</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1e293b' }}>
-                          {selectedUser.subscription.totalDeliveries}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedUser.subscription.remainingDeliveries !== undefined && (
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Remaining Deliveries</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: selectedUser.subscription.remainingDeliveries > 0 ? '#28a745' : '#dc3545' }}>
-                          {selectedUser.subscription.remainingDeliveries}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedUser.subscription.pausedUntil && (
-                      <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Paused Until</div>
-                        <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#f59e0b' }}>
-                          {formatDate(selectedUser.subscription.pausedUntil)}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ padding: '1.5rem', textAlign: 'center', color: '#666', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <p>No subscription found. Click Edit to create a new subscription.</p>
-                  </div>
+                {!a.plus_code && (
+                  <span style={{ background: 'var(--color-background-warning)', color: 'var(--color-text-warning)', borderRadius: 12, fontSize: 10, padding: '2px 8px' }}>No Plus Code</span>
                 )}
               </div>
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              {!a.isDefault && <BtnXS $variant="info" onClick={() => handleSetDefaultAddress(a.id!)}>Set default</BtnXS>}
+              <BtnXS $variant="info" onClick={() => setEditingAddress(a)} title="Edit Address"><FiEdit2 size={11} /></BtnXS>
+              <BtnXS $variant="danger" onClick={() => handleAddressDelete(a.id!)} title="Delete Address"><FiTrash2 size={11} /></BtnXS>
+            </div>
+          </AddrCard>
+        ))}
+        <BtnPrimary 
+           style={{ marginTop: 10, width: '100%', background: 'transparent', color: 'var(--color-text-secondary)', border: '1px dashed var(--color-border)', justifyContent: 'center' }}
+           onClick={() => { setEditingAddress(null); setIsAddrModalOpen(true); }}
+        >
+          <FiPlus /> Add new delivery address
+        </BtnPrimary>
+        <ActionBar>
+          <BtnPrimary onClick={handleProfileSave} disabled={saving}>{saving ? 'Saving…' : 'Save Profile'}</BtnPrimary>
+          <BtnSec onClick={() => setEditFields({ full_name: (selected as any)?.full_name || '', email: selected?.email || '', phone: (selected as any)?.phone || '', alt_phone: (selected as any)?.alt_phone || '' })}>Discard</BtnSec>
+        </ActionBar>
+      </>
+    );
+  };
 
-              <div style={{ marginTop: '2rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <SectionTitle>
-                    <FiMapPin /> Saved Addresses ({selectedUser.addresses.length})
-                  </SectionTitle>
-                  <Button
-                    variant="primary"
-                    onClick={async () => {
-                      // Create new address form
-                      const type = prompt('Address Type (e.g., Home, Office, etc.):', 'Home') || 'Home';
-                      const addressLine = prompt('Full Address:', '') || '';
-                      const street = prompt('Street:', '') || '';
-                      const city = prompt('City:', '') || 'Kolkata';
-                      const state = prompt('State:', '') || 'West Bengal';
-                      const pincode = prompt('Pincode:', '') || '';
-                      const floor = prompt('Floor (optional):', '') || '';
-                      const apartment = prompt('Apartment (optional):', '') || '';
-                      const landmark = prompt('Landmark (optional):', '') || '';
-                      const isDefault = confirm('Should this be the default address?');
+  const renderOrders = () => {
+    const del = filteredOrders.filter(o => o.status === 'delivered' || o.status === 'completed').length;
+    const can = filteredOrders.filter(o => o.status === 'cancelled').length;
+    const rev = filteredOrders.filter(o => o.status === 'delivered' || o.status === 'completed').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
+    return (
+      <>
+        <FilterBar>
+          <FSel value={fStatus} onChange={e => setFStatus(e.target.value)}>
+            <option value="">All status</option>
+            <option value="delivered">Delivered</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="pending">Pending</option>
+            <option value="in_transit">In transit</option>
+          </FSel>
+          <FSel value={fPay} onChange={e => setFPay(e.target.value)}>
+            <option value="">All payments</option>
+            <option value="wallet">Wallet</option>
+            <option value="cash">Cash</option>
+            <option value="upi">UPI</option>
+          </FSel>
+          <FSel value={fSlot} onChange={e => setFSlot(e.target.value)}>
+            <option value="">All slots</option>
+            <option value="1">Slot 1</option><option value="2">Slot 2</option><option value="3">Slot 3</option>
+          </FSel>
+          <FInput placeholder="Order ID…" value={fSearch} onChange={e => setFSearch(e.target.value)} />
+        </FilterBar>
 
-                      if (type && (addressLine || street)) {
-                        try {
-                          const newAddressData = {
-                            userId: selectedUser!.id,
-                            address_type: type,
-                            address_line: addressLine,
-                            street,
-                            city,
-                            state,
-                            pincode,
-                            floor,
-                            apartment,
-                            landmark,
-                            isDefault,
-                            createdAt: new Date(),
-                            updatedAt: new Date()
-                          };
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <Metric style={{ flex: 1, minWidth: 80 }}><ML>Showing</ML><MV>{filteredOrders.length}</MV></Metric>
+          <Metric style={{ flex: 1, minWidth: 80 }}><ML>Delivered</ML><MV $color="var(--color-text-success)">{del}</MV></Metric>
+          <Metric style={{ flex: 1, minWidth: 80 }}><ML>Cancelled</ML><MV $color="var(--color-text-danger)">{can}</MV></Metric>
+          <Metric style={{ flex: 1, minWidth: 80 }}><ML>Revenue</ML><MV>₹{rev}</MV></Metric>
+        </div>
 
-                          const docRef = await addDocument('addresses', newAddressData);
+        <Table>
+          <thead><tr>
+            <Th>Order ID</Th><Th>Date</Th><Th>Slot</Th><Th>Jars</Th><Th>Amount</Th><Th>Payment</Th><Th>Status</Th><Th>Fast</Th><Th />
+          </tr></thead>
+          <tbody>
+            {filteredOrders.length === 0 && <tr><Td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)' }}>No orders match filters</Td></tr>}
+            {filteredOrders.map(o => (
+              <React.Fragment key={o.id}>
+                <tr>
+                  <Td><MonoBadge>{o.raw?.orderNumber || o.id.slice(-8)}</MonoBadge></Td>
+                  <Td style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{fmt(o.createdAt)}</Td>
+                  <Td style={{ fontSize: 11 }}>{o.raw?.deliverySlot || '—'}</Td>
+                  <Td>{o.quantity ?? '—'}</Td>
+                  <Td>₹{o.raw?.total || o.totalAmount || o.amount || 0}</Td>
+                  <Td><IBadge cls={payBadge(o.paymentMethod)}>{o.paymentMethod || '—'}</IBadge></Td>
+                  <Td><IBadge cls={statusBadge(o.status)}>{o.status}</IBadge></Td>
+                  <Td>{(o.raw?.isPriority || o.fastDelivery) ? <IBadge cls="b-transit">Yes</IBadge> : '—'}</Td>
+                  <Td>
+                    <ExpandBtn onClick={() => setExpandedOrder(expandedOrder === o.id ? null : o.id)}>
+                      {expandedOrder === o.id ? <><FiChevronUp size={11} /> Hide</> : <><FiChevronDown size={11} /> Details</>}
+                    </ExpandBtn>
+                  </Td>
+                </tr>
+                {expandedOrder === o.id && (
+                  <tr>
+                    <Td colSpan={9} style={{ padding: '0 10px 10px' }}>
+                      <OrderDetail>
+                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Order breakdown — {o.raw?.orderNumber || o.id}</div>
+                        <DetailGrid>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Delivery Address</div><div style={{ fontSize: 11 }}>{o.raw?.deliveryAddress?.fullAddress || o.address || '—'}</div></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Delivery Date</div><div style={{ fontSize: 12, fontWeight: 500 }}>{o.raw?.deliveryDate || '—'}</div></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Delivery Slot</div><div style={{ fontSize: 12, fontWeight: 500 }}>{o.raw?.deliverySlot || '—'}</div></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Payment Status</div><div style={{ fontSize: 12, fontWeight: 500 }}>{o.raw?.paymentStatus || '—'}</div></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Fast Delivery</div><div style={{ fontSize: 12, fontWeight: 500 }}>{o.raw?.isPriority ? '₹7 fee' : 'None'}</div></div>
+                          <div>
+                            <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Items</div>
+                            <div style={{ fontSize: 12, fontWeight: 500 }}>
+                              {o.items && o.items.length > 0 ? (
+                                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                  {o.items.map((item: any, idx: number) => (
+                                    <li key={idx}>{item.name} × {item.quantity || 1} = ₹{((item.price || 0) * (item.quantity || 1)).toFixed(2)}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                `${o.quantity} jar(s) × ₹37`
+                              )}
+                            </div>
+                          </div>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Total charged</div><div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-info)' }}>₹{o.raw?.total || o.amount}</div></div>
+                        </DetailGrid>
 
-                          // Update the local state
-                          if (selectedUser) {
-                            const newAddress = {
-                              id: docRef.id,
-                              ...newAddressData
-                            };
+                        <div style={{ marginTop: '12px', borderTop: '0.5px solid var(--color-border-tertiary)', paddingTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <button 
+                            onClick={() => {
+                              const win = window.open('', '_blank');
+                              win?.document.write(`<pre>${JSON.stringify(o.raw || o, null, 2)}</pre>`);
+                            }}
+                            style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '10px', cursor: 'pointer', textDecoration: 'underline' }}
+                          >
+                            View raw JSON
+                          </button>
+                          <BtnXS $variant="info" onClick={() => router.push(`/admin/orders?orderId=${o.id}`)} style={{ padding: '6px 12px', gap: '6px' }}>
+                            <FiPackage size={14} /> View in Orders tab
+                          </BtnXS>
+                        </div>
+                      </OrderDetail>
+                    </Td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </Table>
+      </>
+    );
+  };
 
-                            setSelectedUser({
-                              ...selectedUser,
-                              addresses: [...selectedUser.addresses, {
-                                id: newAddress.id,
-                                userId: newAddress.userId,
-                                type: newAddress.address_type,
-                                addressLine: newAddress.address_line,
-                                street: newAddress.street,
-                                city: newAddress.city,
-                                state: newAddress.state,
-                                pincode: newAddress.pincode,
-                                floor: newAddress.floor,
-                                apartment: newAddress.apartment,
-                                landmark: newAddress.landmark,
-                                isDefault: newAddress.isDefault,
-                                createdAt: newAddress.createdAt
-                              }]
-                            });
+  const renderTransactions = () => {
+    const totalCredit = userTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
+    const totalDebit  = userTxns.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
+    return (
+      <>
+        <FilterBar>
+          <FSel value={ftType} onChange={e => setFtType(e.target.value)}>
+            <option value="">All types</option>
+            <option value="credit">Credits</option>
+            <option value="debit">Debits</option>
+          </FSel>
+          <FSel value={ftCat} onChange={e => setFtCat(e.target.value)}>
+            <option value="">All categories</option>
+            <option value="order_payment">Order payment</option>
+            <option value="wallet_topup">Wallet topup</option>
+            <option value="referral">Referral reward</option>
+            <option value="refund">Refund</option>
+            <option value="admin_adjustment">Admin adjustment</option>
+          </FSel>
+        </FilterBar>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <Metric style={{ flex: 1 }}><ML>Total credits</ML><MV $color="var(--color-text-success)">+₹{totalCredit}</MV></Metric>
+          <Metric style={{ flex: 1 }}><ML>Total debits</ML><MV $color="var(--color-text-danger)">-₹{totalDebit}</MV></Metric>
+          <Metric style={{ flex: 1 }}><ML>Current balance</ML><MV>₹{selected?.wallet_balance ?? 0}</MV></Metric>
+        </div>
+        <Table>
+          <thead><tr>
+            <Th>Txn ID</Th><Th>Date</Th><Th>Type</Th><Th>Category</Th><Th>Method</Th><Th>Amount</Th><Th>Note</Th>
+          </tr></thead>
+          <tbody>
+            {filteredTxns.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)' }}>No transactions</Td></tr>}
+            {filteredTxns.map(t => (
+              <tr key={t.id}>
+                <Td><MonoBadge style={{ fontSize: 10 }}>{t.id.slice(-8)}</MonoBadge></Td>
+                <Td style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{fmt(t.createdAt)}</Td>
+                <Td><IBadge cls={t.type === 'credit' ? 'b-delivered' : 'b-cancelled'}>{t.type}</IBadge></Td>
+                <Td style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{(t.category || '').replace('_', ' ')}</Td>
+                <Td>{t.method ? <IBadge cls={payBadge(t.method)}>{t.method}</IBadge> : '—'}</Td>
+                <Td style={{ fontWeight: 500, color: t.type === 'credit' ? 'var(--color-text-success)' : 'var(--color-text-danger)' }}>
+                  {t.type === 'credit' ? '+' : '-'}₹{t.amount}
+                </Td>
+                <Td style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{t.note || '—'}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </>
+    );
+  };
 
-                            alert('New address added successfully!');
-                          }
-                        } catch (error) {
-                          console.error('Error adding address:', error);
-                          alert('Error adding address. Please try again.');
-                        }
-                      }
+  const renderRevenue = () => {
+    const del = oDelivered(userOrders);
+    const rev = oRevenue(userOrders);
+    const discounts = userOrders.reduce((s, o) => s + (o.discount || 0), 0);
+    const deposits  = userOrders.reduce((s, o) => s + (o.deposit || 0), 0);
+    const fastFees  = del.filter(o => o.fastDelivery).length * 7;
+    const walletRev = del.filter(o => o.paymentMethod === 'wallet').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
+    const cashRev   = del.filter(o => o.paymentMethod === 'cash').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
+    const upiRev    = del.filter(o => o.paymentMethod !== 'wallet' && o.paymentMethod !== 'cash').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
+    return (
+      <>
+        <RevGrid>
+          <RevCard><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 3 }}>Total revenue</div><div style={{ fontSize: 22, fontWeight: 500, color: 'var(--color-text-success)' }}>₹{rev}</div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 2 }}>Delivered orders only</div></RevCard>
+          <RevCard><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 3 }}>Discounts given</div><div style={{ fontSize: 22, fontWeight: 500, color: 'var(--color-text-danger)' }}>-₹{discounts}</div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 2 }}>First order &amp; referral</div></RevCard>
+          <RevCard><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 3 }}>Deposits collected</div><div style={{ fontSize: 22, fontWeight: 500, color: 'var(--color-text-warning)' }}>₹{deposits}</div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 2 }}>Jar deposits</div></RevCard>
+          <RevCard><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 3 }}>Fast delivery fees</div><div style={{ fontSize: 22, fontWeight: 500, color: 'var(--color-text-info)' }}>₹{fastFees}</div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 2 }}>{del.filter(o => o.fastDelivery).length} fast orders</div></RevCard>
+          <RevCard><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 3 }}>Avg order value</div><div style={{ fontSize: 22, fontWeight: 500 }}>₹{del.length ? Math.round(rev / del.length) : 0}</div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 2 }}>Delivered orders</div></RevCard>
+          <RevCard><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 3 }}>Net revenue</div><div style={{ fontSize: 22, fontWeight: 500, color: 'var(--color-text-success)' }}>₹{rev - discounts}</div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 2 }}>After discounts</div></RevCard>
+        </RevGrid>
+        <SectionTitle>Revenue by payment method</SectionTitle>
+        <Bar label="Wallet" val={walletRev} total={rev} color="#085041" suffix={`₹${walletRev}`} />
+        <Bar label="UPI"    val={upiRev}    total={rev} color="#3C3489" suffix={`₹${upiRev}`} />
+        <Bar label="Cash"   val={cashRev}   total={rev} color="#633806" suffix={`₹${cashRev}`} />
+      </>
+    );
+  };
+
+  const renderWallet = () => (
+    <>
+      <Metrics $cols={3}>
+        <Metric><ML>Wallet balance</ML><MV $color="var(--color-text-success)">₹{selected?.wallet_balance ?? 0}</MV></Metric>
+        <Metric><ML>Jars with customer</ML><MV>{selected?.jars_occupied ?? 0}</MV></Metric>
+        <Metric><ML>Jar deposit</ML><MV $color="var(--color-text-warning)">₹200</MV></Metric>
+      </Metrics>
+      <SectionTitle>Manual wallet adjustment</SectionTitle>
+      <WalletAdj>
+        <AdjRow>
+          <span>Type</span>
+          <AdjSelect value={adjType} onChange={e => setAdjType(e.target.value)}><option>Credit</option><option>Debit</option></AdjSelect>
+          <span>Amount (₹)</span>
+          <AdjInput type="number" placeholder="0" style={{ width: 80 }} value={adjAmt} onChange={e => setAdjAmt(e.target.value)} />
+          <span>Reason</span>
+          <AdjInput placeholder="e.g. Referral reward" style={{ flex: 1, minWidth: 120 }} value={adjReason} onChange={e => setAdjReason(e.target.value)} />
+        </AdjRow>
+        <BtnPrimary onClick={handleWalletAdj} disabled={saving}>Apply &amp; log to transactions</BtnPrimary>
+      </WalletAdj>
+      <SectionTitle>Jar management</SectionTitle>
+      <WalletAdj>
+        <AdjRow>
+          <span>Jars with customer</span>
+          <AdjInput type="number" style={{ width: 70 }} value={jarCount} onChange={e => setJarCount(e.target.value)} />
+          <span>Reason</span>
+          <AdjInput placeholder="e.g. Manual correction" style={{ flex: 1, minWidth: 120 }} value={jarReason} onChange={e => setJarReason(e.target.value)} />
+        </AdjRow>
+        <BtnPrimary onClick={handleJarCorrection} disabled={saving}>Save jar correction &amp; audit log</BtnPrimary>
+      </WalletAdj>
+    </>
+  );
+
+  const renderAddressModal = () => {
+    if (!isAddrModalOpen) return null;
+    return (
+      <ModalBackdrop onClick={() => setIsAddrModalOpen(false)}>
+        <ModalContainer onClick={e => e.stopPropagation()} style={{ maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
+          <ModalHead>
+            <ModalTitle>{editingAddress ? 'Edit Address' : 'Add New Address'}</ModalTitle>
+            <CloseBtn onClick={() => { setIsAddrModalOpen(false); setEditingAddress(null); }}>&times;</CloseBtn>
+          </ModalHead>
+          <ModalBody>
+            {/* Plus Code — critical for pinpoint delivery */}
+            <div style={{ background: 'linear-gradient(135deg, #E3F2FD, #EDE7F6)', borderRadius: 10, padding: '10px 14px', marginBottom: 14, border: '1.5px solid #90CAF9' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#1565C0', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>📍 Plus Code — Required for Pinpoint Delivery</div>
+              <input
+                value={addrForm.plus_code || ''}
+                onChange={e => setAddrForm(p => ({ ...p, plus_code: e.target.value }))}
+                placeholder="e.g. RWMW+5Q Kolkata" 
+                style={{ width: '100%', padding: '8px 12px', fontSize: 13, fontFamily: 'monospace', fontWeight: 600, border: '1.5px solid #90CAF9', borderRadius: 8, background: 'white', color: '#1565C0', boxSizing: 'border-box' }}
+              />
+              <div style={{ fontSize: 10, color: '#1976D2', marginTop: 5 }}>Find at maps.google.com → right-click location → copy plus code</div>
+            </div>
+
+            {/* Address type + full line */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+              <ProfileField style={{ gridColumn: 'span 2' }}>
+                <label>Address Type</label>
+                <select value={addrForm.address_type || 'Home'} onChange={e => setAddrForm(p => ({ ...p, address_type: e.target.value }))}>
+                  <option>Home</option>
+                  <option>Work</option>
+                  <option>Other</option>
+                </select>
+              </ProfileField>
+              <ProfileField style={{ gridColumn: 'span 2' }}>
+                <label>Full Address Line *</label>
+                <input value={addrForm.address_line || ''} onChange={e => setAddrForm(p => ({ ...p, address_line: e.target.value }))} placeholder="e.g. 402 Block B, Lake Road, Near Park, Kolkata 700006" />
+              </ProfileField>
+
+              {/* House / flat details — matches iOS AddressModal.jsx fields */}
+              <ProfileField>
+                <label>House / Flat / Block No.</label>
+                <input value={addrForm.house_no || ''} onChange={e => setAddrForm(p => ({ ...p, house_no: e.target.value }))} placeholder="e.g. 402, Block B" />
+              </ProfileField>
+              <ProfileField>
+                <label>Floor No.</label>
+                <input value={addrForm.floor_no || ''} onChange={e => setAddrForm(p => ({ ...p, floor_no: e.target.value }))} placeholder="e.g. 3 or G" />
+              </ProfileField>
+              <ProfileField>
+                <label>Landmark (optional)</label>
+                <input value={addrForm.landmark || ''} onChange={e => setAddrForm(p => ({ ...p, landmark: e.target.value }))} placeholder="e.g. Near Central Park" />
+              </ProfileField>
+              <ProfileField>
+                <label>Lift Available?</label>
+                <select value={addrForm.lift_available || ''} onChange={e => setAddrForm(p => ({ ...p, lift_available: e.target.value || null }))}>
+                  <option value="">Not applicable</option>
+                  <option value="Yes">Yes</option>
+                  <option value="No">No</option>
+                </select>
+              </ProfileField>
+            </div>
+
+            {/* Toggles */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', border: '0.5px solid var(--color-border-secondary)', borderRadius: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>🐾 Be aware of dogs</span>
+              <input type="checkbox" checked={!!addrForm.be_aware_of_dogs} onChange={e => setAddrForm(p => ({ ...p, be_aware_of_dogs: e.target.checked }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', border: '0.5px solid var(--color-border-secondary)', borderRadius: 8, marginBottom: 14 }}>
+              <span style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>⭐ Set as default delivery address</span>
+              <input type="checkbox" checked={!!addrForm.isDefault} onChange={e => setAddrForm(p => ({ ...p, isDefault: e.target.checked }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <BtnPrimary style={{ flex: 1 }} onClick={handleAddressSave} disabled={saving}>
+                {saving ? 'Saving...' : (editingAddress ? 'Update' : 'Add')} Address
+              </BtnPrimary>
+              <BtnSec onClick={() => { setIsAddrModalOpen(false); setEditingAddress(null); }}>Cancel</BtnSec>
+            </div>
+          </ModalBody>
+        </ModalContainer>
+      </ModalBackdrop>
+    );
+  };
+
+  const tabContent: Record<TabId, React.ReactNode> = {
+    overview:     renderOverview(),
+    profile:      renderProfile(),
+    orders:       renderOrders(),
+    transactions: renderTransactions(),
+    revenue:      renderRevenue(),
+    wallet:       renderWallet(),
+  };
+
+  const statusVariant = (s?: string | boolean) => {
+    if (s === 'Verified' || s === true) return 'success';
+    if (s === 'Blocked') return 'danger';
+    return 'warning';
+  };
+
+  return (
+    <>
+      <Wrap>
+        {/* ── Sidebar ── */}
+        <Sidebar>
+          <SideHead>
+            <SHeadLabel>Customers</SHeadLabel>
+            <Search>
+              <FiSearch />
+              <SearchInput placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
+            </Search>
+          </SideHead>
+          <UserList>
+            {filteredUsers.map(u => {
+              const p = palette(u.customerId || u.id);
+              const name = dName(u);
+              return (
+                <UserRow key={u.id} $active={selected?.id === u.id} onClick={() => setSelected(u)}>
+                  <Avatar $bg={p.bg} $tc={p.tc}>{initials(name)}</Avatar>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <UName $active={selected?.id === u.id}>{name}</UName>
+                    <UID>{u.customerId || u.id}</UID>
+                  </div>
+                  <button
+                    title="Permanently delete user"
+                    onClick={e => { e.stopPropagation(); handleDeleteUser(u); }}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
+                      color: 'var(--color-text-tertiary)', borderRadius: 4, flexShrink: 0,
+                      opacity: 0, transition: 'opacity 0.15s',
                     }}
-                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '0')}
                   >
-                    <FiEdit3 size={12} /> Manage Addresses
-                  </Button>
-                </div>
+                    <FiTrash2 size={12} color="var(--color-text-danger)" />
+                  </button>
+                </UserRow>
+              );
+            })}
+            {filteredUsers.length === 0 && <EmptyState>No users found</EmptyState>}
+          </UserList>
+        </Sidebar>
 
-                {selectedUser.addresses.length > 0 ? (
-                  selectedUser.addresses.map((address) => (
-                    <div key={address.id} style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '1rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                        <div style={{ background: '#e0e7ff', color: '#4338ca', padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase' }}>
-                          {address.type}
-                        </div>
-                        {address.isDefault && (
-                          <div style={{
-                            background: '#dcfce7',
-                            color: '#16a34a',
-                            fontSize: '0.7rem',
-                            padding: '0.125rem 0.5rem',
-                            borderRadius: '9999px',
-                            fontWeight: '700',
-                            textTransform: 'uppercase'
-                          }}>
-                            DEFAULT
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '0.875rem', color: '#475569', lineHeight: '1.5', marginBottom: '0.75rem' }}>
-                        {address.addressLine || (
-                          `${address.floor ? `Floor ${address.floor}, ` : ''}${address.apartment ? `${address.apartment}, ` : ''}${address.street}, ${address.city}, ${address.state} - ${address.pincode}${address.landmark ? `\nLandmark: ${address.landmark}` : ''}`
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <Button
-                          variant="secondary"
-                          onClick={() => openMap(address)}
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                        >
-                          <FiNavigation size={12} /> Navigate
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={async () => {
-                            // Create an address edit form
-                            const type = prompt('Address Type:', address.type) || address.type;
-                            const addressLine = prompt('Full Address:', address.addressLine || '') || address.addressLine || '';
-                            const street = prompt('Street:', address.street || '') || address.street || '';
-                            const city = prompt('City:', address.city || 'Kolkata') || 'Kolkata';
-                            const state = prompt('State:', address.state || 'West Bengal') || 'West Bengal';
-                            const pincode = prompt('Pincode:', address.pincode || '') || address.pincode || '';
-                            const floor = prompt('Floor (optional):', address.floor || '') || '';
-                            const apartment = prompt('Apartment (optional):', address.apartment || '') || '';
-                            const landmark = prompt('Landmark (optional):', address.landmark || '') || '';
-                            const isDefault = confirm(`Should this be the default address? Current: ${address.isDefault}`);
-
-                            if (type && (addressLine || street)) {
-                              try {
-                                await updateDocument('addresses', address.id, {
-                                  address_type: type,
-                                  address_line: addressLine,
-                                  street,
-                                  city,
-                                  state,
-                                  pincode,
-                                  floor,
-                                  apartment,
-                                  landmark,
-                                  isDefault,
-                                  updatedAt: new Date()
-                                });
-
-                                // Update the local state
-                                if (selectedUser) {
-                                  const updatedAddresses = selectedUser.addresses.map(addr =>
-                                    addr.id === address.id
-                                      ? { ...addr, type, addressLine, street, city, state, pincode, floor, apartment, landmark, isDefault }
-                                      : addr
-                                  );
-
-                                  setSelectedUser({
-                                    ...selectedUser,
-                                    addresses: updatedAddresses
-                                  });
-
-                                  alert('Address updated successfully!');
-                                }
-                              } catch (error) {
-                                console.error('Error updating address:', error);
-                                alert('Error updating address. Please try again.');
-                              }
-                            }
-                          }}
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                        >
-                          <FiEdit3 size={12} /> Edit
-                        </Button>
-                      </div>
+        {/* ── Main Panel ── */}
+        <Main>
+          {selected ? (
+            <>
+              {/* Header */}
+              <MainHead>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Avatar $bg={selPalette.bg} $tc={selPalette.tc} $size={36}>
+                    {initials(dName(selected))}
+                  </Avatar>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{dName(selected)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+                      {selected.customerId} · Joined {fmt(selected.createdAt)}
                     </div>
-                  ))
-                ) : (
-                  <div style={{ padding: '1.5rem', textAlign: 'center', color: '#666', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <p>No addresses found for this user.</p>
                   </div>
-                )}
-              </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <Badge $variant={statusVariant(selected.status || selected.isActive)}>
+                    {selected.status || (selected.isActive ? 'Active' : 'Inactive')}
+                  </Badge>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <BtnXS $variant="info" as="a" href={`tel:${selected?.phoneNumber || selected?.phone}`} style={{ textDecoration: 'none', width: '32px', padding: 0, justifyContent: 'center' }} title="Call Customer">
+                      <FiPhoneCall size={14} />
+                    </BtnXS>
+                    <BtnXS $variant="success" as="a" href={`https://wa.me/${(selected?.phoneNumber || selected?.phone || '').replace(/\D/g, '')}`} target="_blank" style={{ textDecoration: 'none', background: '#25D366', color: 'white', borderColor: '#25D366', width: '32px', padding: 0, justifyContent: 'center' }} title="WhatsApp">
+                      <FiMessageCircle size={14} /> 
+                    </BtnXS>
+                  </div>
+                  <CopyBtn onClick={() => { navigator.clipboard.writeText(selected.customerId); showToast('ID copied'); }}>
+                    <FiCopy size={11} />
+                  </CopyBtn>
+                  <BtnXS $variant="danger" onClick={() => showToast('Account suspended')}>
+                    <FiSlash size={11} /> Suspend
+                  </BtnXS>
+                  <BtnXS $variant="info" onClick={() => showToast('FCM message sent')}>
+                    <FiBell size={11} /> FCM
+                  </BtnXS>
+                </div>
+              </MainHead>
 
-              <ActionRow>
-                {editMode ? (
-                  <>
-                    <Button
-                      variant="primary"
-                      onClick={handleSave}
-                      disabled={saving}
-                    >
-                      <FiSave />
-                      {saving ? 'Saving...' : 'Save Changes'}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setEditMode(false);
-                        setEditedUser(selectedUser);
-                      }}
-                    >
-                      <FiX />
-                      Cancel
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button
-                      variant="primary"
-                      onClick={() => setEditMode(true)}
-                    >
-                      <FiEdit3 />
-                      Edit Details
-                    </Button>
-                    <Button
-                      variant="danger"
-                      onClick={handleDelete}
-                      disabled={saving}
-                    >
-                      <FiX />
-                      {saving ? 'Deleting...' : 'Delete User'}
-                    </Button>
-                  </>
-                )}
-              </ActionRow>
-            </ModalBody>
-          </ModalContent>
-          </ModalOverlay>
-        )}
-    </AnimatePresence>
-    </Container >
+              {/* Tabs */}
+              <TabBar>
+                {(['overview', 'profile', 'orders', 'transactions', 'revenue', 'wallet'] as TabId[]).map(t => (
+                  <Tab key={t} $active={tab === t} onClick={() => setTab(t)}>
+                    {t === 'overview' ? 'Overview' :
+                     t === 'profile'  ? 'Profile & Addresses' :
+                     t === 'orders'   ? 'Orders' :
+                     t === 'transactions' ? 'Transactions' :
+                     t === 'revenue'  ? 'Revenue' : 'Wallet & Jars'}
+                  </Tab>
+                ))}
+              </TabBar>
+
+              {/* Tab body */}
+              <TabBody key={`${selected.id}-${tab}`}>
+                {tabContent[tab]}
+              </TabBody>
+            </>
+          ) : (
+            <EmptyState style={{ margin: 'auto' }}>
+              <FiSearch size={32} style={{ opacity: 0.3, marginBottom: 12 }} />
+              <p>Select a customer from the sidebar</p>
+            </EmptyState>
+          )}
+        </Main>
+      </Wrap>
+
+      <Toast $show={toastShow}>{toast}</Toast>
+      {renderAddressModal()}
+    </>
   );
 }

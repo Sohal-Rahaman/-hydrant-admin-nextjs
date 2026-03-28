@@ -584,7 +584,7 @@ export default function AnalyticsPage() {
       <Header>
         <TitleSection>
           <AnalyticsLogo
-            src="/logo.jpeg"
+            src="/hydrantlogo.png"
             alt="Hydrant Logo"
             width={45}
             height={45}
@@ -902,6 +902,596 @@ export default function AnalyticsPage() {
           </ResponsiveContainer>
         </ChartCard>
       </MetricsGrid>
+
+      {/* ─── Operational Intelligence ─── */}
+      <OperationalIntelligence />
     </AnalyticsContainer>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// OPERATIONAL INTELLIGENCE — Jars, Dormant Users, Wallet Report
+// ════════════════════════════════════════════════════════════════
+
+const OISection = styled.div`
+  margin-top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+`;
+
+const OICard = styled.div`
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.07);
+  border: 1px solid #f0f0f0;
+  overflow: hidden;
+`;
+
+const OIHead = styled.div<{ $color?: string }>`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: ${p => p.$color || '#f8fafc'};
+  border-bottom: 1px solid #e8ecf0;
+  flex-wrap: wrap;
+  gap: 10px;
+`;
+
+const OITitle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a18;
+`;
+
+const OIBadge = styled.span<{ $color: string }>`
+  background: ${p => p.$color};
+  color: white;
+  border-radius: 20px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+`;
+
+const ExportBtnRow = styled.div`
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+`;
+
+const ExportBtn = styled.button<{ $variant?: 'green' | 'blue' | 'orange' }>`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: ${p =>
+    p.$variant === 'green' ? '#10b981' :
+    p.$variant === 'blue' ? '#3b82f6' :
+    p.$variant === 'orange' ? '#f59e0b' :
+    '#6b7280'};
+  color: white;
+  &:hover { opacity: 0.85; transform: translateY(-1px); }
+`;
+
+const OITable = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+`;
+
+const OITh = styled.th`
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+`;
+
+const OITd = styled.td`
+  padding: 10px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
+  vertical-align: middle;
+`;
+
+const CLink = styled.a`
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 500;
+  &:hover { text-decoration: underline; }
+`;
+
+const EmptyRow = styled.div`
+  padding: 40px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 14px;
+`;
+
+const JAR_ICON = '🫙';
+const DORMANT_ICON = '💤';
+const NEVER_ICON = '👤';
+const WALLET_ICON = '💰';
+
+// ── Helpers ──
+const toMs = (d: any): number => {
+  if (!d) return 0;
+  if (typeof d.toMillis === 'function') return d.toMillis();
+  if (typeof d.toDate === 'function') return d.toDate().getTime();
+  if (d instanceof Date) return d.getTime();
+  if (typeof d === 'string' || typeof d === 'number') return new Date(d).getTime();
+  return 0;
+};
+
+const fmtDate = (d: any) => {
+  const ms = toMs(d);
+  if (!ms) return '—';
+  return new Date(ms).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+// CSV escape + download helper
+const escCSV = (v: any) => {
+  const s = String(v ?? '');
+  return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+const buildCSV = (headers: string[], rows: (string | number)[][]): string =>
+  [headers.map(escCSV).join(','), ...rows.map(r => r.map(escCSV).join(','))].join('\n');
+
+const downloadFile = (content: string, filename: string, mime = 'text/csv') => {
+  const blob = new Blob(['\ufeff' + content], { type: `${mime};charset=utf-8;` });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+const openGoogleSheets = (content: string) => {
+  // Copy CSV to clipboard then open Google Sheets new spreadsheet
+  navigator.clipboard.writeText(content).then(() => {
+    alert('📋 Data copied to clipboard!\n\nNow paste it into the Google Sheet that will open.');
+    window.open('https://sheets.new', '_blank');
+  }).catch(() => {
+    window.open('https://sheets.new', '_blank');
+  });
+};
+
+const TODAY = new Date();
+const ONE_MONTH_AGO = new Date(TODAY.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+interface RawUser {
+  id: string;
+  customerId?: string;
+  full_name?: string;
+  name?: string;
+  phone?: string;
+  phoneNumber?: string;
+  email?: string;
+  wallet_balance?: number;
+  jars_occupied?: number;
+  createdAt?: any;
+  [k: string]: any;
+}
+
+interface RawAddr {
+  id: string;
+  userId?: string;
+  address_line?: string;
+  address_type?: string;
+  isDefault?: boolean;
+}
+
+interface RawOrder {
+  id: string;
+  userId?: string;
+  status?: string;
+  createdAt?: any;
+  total?: number;
+  amount?: number;
+}
+
+function OperationalIntelligence() {
+  const [users, setUsers]     = useState<RawUser[]>([]);
+  const [addresses, setAddresses] = useState<RawAddr[]>([]);
+  const [orders, setOrders]   = useState<RawOrder[]>([]);
+  const [ready, setReady]     = useState(false);
+
+  useEffect(() => {
+    let c = 0;
+    const done = () => { c++; if (c === 3) setReady(true); };
+    const u1 = subscribeToCollection('users',     s => { setUsers(s.docs.map(d => ({ id: d.id, ...d.data() } as RawUser)));     done(); });
+    const u2 = subscribeToCollection('addresses', s => { setAddresses(s.docs.map(d => ({ id: d.id, ...d.data() } as RawAddr))); done(); });
+    const u3 = subscribeToCollection('orders',    s => { setOrders(s.docs.map(d => ({ id: d.id, ...d.data() } as RawOrder)));   done(); });
+    return () => { u1(); u2(); u3(); };
+  }, []);
+
+  // ── Derived datasets ──
+  const userOrderMap = React.useMemo(() => {
+    const m: Record<string, RawOrder[]> = {};
+    orders.forEach(o => { if (o.userId) { m[o.userId] = m[o.userId] || []; m[o.userId].push(o); } });
+    return m;
+  }, [orders]);
+
+  const userAddrMap = React.useMemo(() => {
+    const m: Record<string, RawAddr[]> = {};
+    addresses.forEach(a => { if (a.userId) { m[a.userId] = m[a.userId] || []; m[a.userId].push(a); } });
+    return m;
+  }, [addresses]);
+
+  // 1️⃣ Jars on hold
+  const jarsOnHold = React.useMemo(() =>
+    users
+      .filter(u => (u.jars_occupied || 0) > 0)
+      .sort((a, b) => (b.jars_occupied || 0) - (a.jars_occupied || 0)),
+  [users]);
+
+  // 2️⃣ Never ordered
+  const neverOrdered = React.useMemo(() =>
+    users.filter(u => !(userOrderMap[u.id]?.length)).sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt)),
+  [users, userOrderMap]);
+
+  // 3️⃣ Dormant >30 days (had orders but last was >30 days ago)
+  const dormant30 = React.useMemo(() =>
+    users.filter(u => {
+      const ords = userOrderMap[u.id];
+      if (!ords?.length) return false;
+      const lastMs = Math.max(...ords.map(o => toMs(o.createdAt)));
+      return lastMs > 0 && lastMs < ONE_MONTH_AGO.getTime();
+    }).map(u => {
+      const ords = userOrderMap[u.id];
+      const lastMs = Math.max(...ords!.map(o => toMs(o.createdAt)));
+      const daysSince = Math.floor((TODAY.getTime() - lastMs) / 86400000);
+      return { ...u, daysSince, lastOrderDate: new Date(lastMs) };
+    }).sort((a, b) => b.daysSince - a.daysSince),
+  [users, userOrderMap]);
+
+  // 4️⃣ Wallet overview
+  const walletUsers = React.useMemo(() =>
+    users.filter(u => (u.wallet_balance || 0) > 0).sort((a, b) => (b.wallet_balance || 0) - (a.wallet_balance || 0)),
+  [users]);
+  const totalWalletBalance = walletUsers.reduce((s, u) => s + (u.wallet_balance || 0), 0);
+
+  // ── Name helper ──
+  const uName = (u: RawUser) => u.full_name || u.name || u.email || u.customerId || u.id;
+  const uPhone = (u: RawUser) => u.phone || u.phoneNumber || '—';
+  const uAddr = (u: RawUser) => {
+    const addrs = userAddrMap[u.id] || [];
+    const def = addrs.find(a => a.isDefault) || addrs[0];
+    return def?.address_line || '—';
+  };
+  const uOrders = (u: RawUser) => userOrderMap[u.id]?.length || 0;
+
+  // ── Export functions ──
+  const exportJars = () => {
+    const headers = ['Customer ID', 'Name', 'Phone', 'Email', 'Jars On Hold', 'Default Address', 'Total Orders', 'Joined'];
+    const rows = jarsOnHold.map(u => [u.customerId || u.id, uName(u), uPhone(u), u.email || '', u.jars_occupied || 0, uAddr(u), uOrders(u), fmtDate(u.createdAt)]);
+    downloadFile(buildCSV(headers, rows), `hydrant_jars_on_hold_${new Date().toISOString().slice(0,10)}.csv`);
+  };
+
+  const exportNeverOrdered = () => {
+    const headers = ['Customer ID', 'Name', 'Phone', 'Email', 'Wallet Balance (₹)', 'Default Address', 'Joined'];
+    const rows = neverOrdered.map(u => [u.customerId || u.id, uName(u), uPhone(u), u.email || '', u.wallet_balance || 0, uAddr(u), fmtDate(u.createdAt)]);
+    downloadFile(buildCSV(headers, rows), `hydrant_never_ordered_${new Date().toISOString().slice(0,10)}.csv`);
+  };
+
+  const exportDormant = () => {
+    const headers = ['Customer ID', 'Name', 'Phone', 'Email', 'Days Since Last Order', 'Last Order Date', 'Total Orders', 'Wallet Balance (₹)', 'Default Address'];
+    const rows = dormant30.map(u => [u.customerId || u.id, uName(u), uPhone(u), u.email || '', u.daysSince, fmtDate(u.lastOrderDate), uOrders(u), u.wallet_balance || 0, uAddr(u)]);
+    downloadFile(buildCSV(headers, rows), `hydrant_dormant_users_${new Date().toISOString().slice(0,10)}.csv`);
+  };
+
+  const exportWallet = () => {
+    const headers = ['Customer ID', 'Name', 'Phone', 'Email', 'Wallet Balance (₹)', 'Total Orders', 'Default Address'];
+    const rows = walletUsers.map(u => [u.customerId || u.id, uName(u), uPhone(u), u.email || '', u.wallet_balance || 0, uOrders(u), uAddr(u)]);
+    downloadFile(buildCSV(headers, rows), `hydrant_wallet_balances_${new Date().toISOString().slice(0,10)}.csv`);
+  };
+
+  if (!ready) return (
+    <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
+      Loading operational intelligence…
+    </div>
+  );
+
+  const totalJarsOnHold = jarsOnHold.reduce((s, u) => s + (u.jars_occupied || 0), 0);
+
+  return (
+    <OISection>
+      {/* ── 1. Jars On Hold ── */}
+      <OICard>
+        <OIHead $color="linear-gradient(135deg, #fef9c3, #fef08a)">
+          <OITitle>
+            {JAR_ICON} Jars On Hold
+            <OIBadge $color="#d97706">{jarsOnHold.length} users</OIBadge>
+            <OIBadge $color="#92400e">{totalJarsOnHold} total jars</OIBadge>
+          </OITitle>
+          <ExportBtnRow>
+            <ExportBtn $variant="green" onClick={exportJars}>
+              ⬇ Download Excel/CSV
+            </ExportBtn>
+            <ExportBtn $variant="blue" onClick={() => {
+              const headers = ['Customer ID', 'Name', 'Phone', 'Email', 'Jars On Hold', 'Default Address', 'Total Orders', 'Joined'];
+              const rows = jarsOnHold.map(u => [u.customerId || u.id, uName(u), uPhone(u), u.email || '', u.jars_occupied || 0, uAddr(u), uOrders(u), fmtDate(u.createdAt)]);
+              openGoogleSheets(buildCSV(headers, rows));
+            }}>
+              📊 Open in Google Sheets
+            </ExportBtn>
+          </ExportBtnRow>
+        </OIHead>
+        {jarsOnHold.length === 0
+          ? <EmptyRow>No users currently holding jars 🎉</EmptyRow>
+          : (
+          <div style={{ overflowX: 'auto' }}>
+            <OITable>
+              <thead>
+                <tr>
+                  <OITh>Customer</OITh>
+                  <OITh>Phone</OITh>
+                  <OITh>Address</OITh>
+                  <OITh style={{ textAlign: 'center' }}>Jars 🫙</OITh>
+                  <OITh style={{ textAlign: 'center' }}>Orders</OITh>
+                  <OITh>Joined</OITh>
+                  <OITh>Actions</OITh>
+                </tr>
+              </thead>
+              <tbody>
+                {jarsOnHold.map(u => (
+                  <tr key={u.id}>
+                    <OITd>
+                      <div style={{ fontWeight: 600 }}>{uName(u)}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>{u.customerId || u.id}</div>
+                    </OITd>
+                    <OITd>
+                      <CLink href={`tel:${uPhone(u)}`}>{uPhone(u)}</CLink>
+                    </OITd>
+                    <OITd style={{ maxWidth: 220, fontSize: 11, color: '#475569' }}>{uAddr(u)}</OITd>
+                    <OITd style={{ textAlign: 'center' }}>
+                      <span style={{ background: '#fef3c7', color: '#92400e', borderRadius: 8, padding: '3px 10px', fontWeight: 700, fontSize: 13 }}>
+                        {u.jars_occupied}
+                      </span>
+                    </OITd>
+                    <OITd style={{ textAlign: 'center' }}>{uOrders(u)}</OITd>
+                    <OITd style={{ fontSize: 11 }}>{fmtDate(u.createdAt)}</OITd>
+                    <OITd>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <CLink href={`tel:${uPhone(u)}`} title="Call">📞</CLink>
+                        <CLink href={`https://wa.me/${uPhone(u).replace(/\D/g, '')}`} target="_blank" title="WhatsApp">💬</CLink>
+                        <CLink href={`/admin/users?customerId=${u.customerId || u.id}`} title="View profile">👤</CLink>
+                      </div>
+                    </OITd>
+                  </tr>
+                ))}
+              </tbody>
+            </OITable>
+          </div>
+        )}
+      </OICard>
+
+      {/* ── 2. Never Ordered ── */}
+      <OICard>
+        <OIHead $color="linear-gradient(135deg, #fee2e2, #fecaca)">
+          <OITitle>
+            {NEVER_ICON} Never Ordered
+            <OIBadge $color="#dc2626">{neverOrdered.length} users</OIBadge>
+          </OITitle>
+          <ExportBtnRow>
+            <ExportBtn $variant="green" onClick={exportNeverOrdered}>⬇ Download Excel/CSV</ExportBtn>
+            <ExportBtn $variant="blue" onClick={() => {
+              const headers = ['Customer ID', 'Name', 'Phone', 'Email', 'Wallet Balance (₹)', 'Default Address', 'Joined'];
+              const rows = neverOrdered.map(u => [u.customerId || u.id, uName(u), uPhone(u), u.email || '', u.wallet_balance || 0, uAddr(u), fmtDate(u.createdAt)]);
+              openGoogleSheets(buildCSV(headers, rows));
+            }}>📊 Open in Google Sheets</ExportBtn>
+          </ExportBtnRow>
+        </OIHead>
+        {neverOrdered.length === 0
+          ? <EmptyRow>All registered users have placed at least one order! 🎉</EmptyRow>
+          : (
+          <div style={{ overflowX: 'auto' }}>
+            <OITable>
+              <thead>
+                <tr>
+                  <OITh>Customer</OITh>
+                  <OITh>Phone</OITh>
+                  <OITh>Email</OITh>
+                  <OITh>Wallet Balance</OITh>
+                  <OITh>Address</OITh>
+                  <OITh>Joined</OITh>
+                  <OITh>Actions</OITh>
+                </tr>
+              </thead>
+              <tbody>
+                {neverOrdered.slice(0, 100).map(u => (
+                  <tr key={u.id}>
+                    <OITd>
+                      <div style={{ fontWeight: 600 }}>{uName(u)}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>{u.customerId || u.id}</div>
+                    </OITd>
+                    <OITd><CLink href={`tel:${uPhone(u)}`}>{uPhone(u)}</CLink></OITd>
+                    <OITd style={{ fontSize: 11 }}>{u.email || '—'}</OITd>
+                    <OITd>
+                      {(u.wallet_balance || 0) > 0
+                        ? <span style={{ color: '#059669', fontWeight: 600 }}>₹{u.wallet_balance}</span>
+                        : <span style={{ color: '#94a3b8' }}>₹0</span>}
+                    </OITd>
+                    <OITd style={{ maxWidth: 200, fontSize: 11, color: '#475569' }}>{uAddr(u)}</OITd>
+                    <OITd style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{fmtDate(u.createdAt)}</OITd>
+                    <OITd>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <CLink href={`tel:${uPhone(u)}`} title="Call">📞</CLink>
+                        <CLink href={`https://wa.me/${uPhone(u).replace(/\D/g, '')}`} target="_blank" title="WhatsApp">💬</CLink>
+                        <CLink href={`/admin/users?customerId=${u.customerId || u.id}`} title="View profile">👤</CLink>
+                      </div>
+                    </OITd>
+                  </tr>
+                ))}
+              </tbody>
+            </OITable>
+            {neverOrdered.length > 100 && (
+              <div style={{ textAlign: 'center', padding: '10px', fontSize: 12, color: '#64748b' }}>
+                Showing 100 of {neverOrdered.length}. Download CSV to see all.
+              </div>
+            )}
+          </div>
+        )}
+      </OICard>
+
+      {/* ── 3. Dormant users (>30 days no order) ── */}
+      <OICard>
+        <OIHead $color="linear-gradient(135deg, #ede9fe, #ddd6fe)">
+          <OITitle>
+            {DORMANT_ICON} Dormant Users — No Order in 30+ Days
+            <OIBadge $color="#7c3aed">{dormant30.length} users</OIBadge>
+          </OITitle>
+          <ExportBtnRow>
+            <ExportBtn $variant="green" onClick={exportDormant}>⬇ Download Excel/CSV</ExportBtn>
+            <ExportBtn $variant="blue" onClick={() => {
+              const headers = ['Customer ID', 'Name', 'Phone', 'Email', 'Days Since Last Order', 'Last Order Date', 'Total Orders', 'Wallet Balance (₹)', 'Default Address'];
+              const rows = dormant30.map(u => [u.customerId || u.id, uName(u), uPhone(u), u.email || '', u.daysSince, fmtDate(u.lastOrderDate), uOrders(u), u.wallet_balance || 0, uAddr(u)]);
+              openGoogleSheets(buildCSV(headers, rows));
+            }}>📊 Open in Google Sheets</ExportBtn>
+          </ExportBtnRow>
+        </OIHead>
+        {dormant30.length === 0
+          ? <EmptyRow>All customers ordered within the last 30 days 🎉</EmptyRow>
+          : (
+          <div style={{ overflowX: 'auto' }}>
+            <OITable>
+              <thead>
+                <tr>
+                  <OITh>Customer</OITh>
+                  <OITh>Phone</OITh>
+                  <OITh style={{ textAlign: 'center' }}>Days Silent</OITh>
+                  <OITh>Last Order</OITh>
+                  <OITh style={{ textAlign: 'center' }}>Total Orders</OITh>
+                  <OITh>Wallet</OITh>
+                  <OITh>Actions</OITh>
+                </tr>
+              </thead>
+              <tbody>
+                {dormant30.slice(0, 100).map(u => (
+                  <tr key={u.id}>
+                    <OITd>
+                      <div style={{ fontWeight: 600 }}>{uName(u)}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>{u.customerId || u.id}</div>
+                    </OITd>
+                    <OITd><CLink href={`tel:${uPhone(u)}`}>{uPhone(u)}</CLink></OITd>
+                    <OITd style={{ textAlign: 'center' }}>
+                      <span style={{
+                        background: u.daysSince > 90 ? '#fee2e2' : u.daysSince > 60 ? '#fef3c7' : '#ede9fe',
+                        color: u.daysSince > 90 ? '#dc2626' : u.daysSince > 60 ? '#d97706' : '#7c3aed',
+                        borderRadius: 8, padding: '3px 10px', fontWeight: 700, fontSize: 13,
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {u.daysSince}d
+                      </span>
+                    </OITd>
+                    <OITd style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{fmtDate(u.lastOrderDate)}</OITd>
+                    <OITd style={{ textAlign: 'center' }}>{uOrders(u)}</OITd>
+                    <OITd style={{ color: (u.wallet_balance || 0) > 0 ? '#059669' : '#94a3b8', fontWeight: 500 }}>
+                      ₹{u.wallet_balance || 0}
+                    </OITd>
+                    <OITd>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <CLink href={`tel:${uPhone(u)}`} title="Call">📞</CLink>
+                        <CLink href={`https://wa.me/${uPhone(u).replace(/\D/g, '')}`} target="_blank" title="WhatsApp">💬</CLink>
+                        <CLink href={`/admin/users?customerId=${u.customerId || u.id}`} title="View profile">👤</CLink>
+                      </div>
+                    </OITd>
+                  </tr>
+                ))}
+              </tbody>
+            </OITable>
+            {dormant30.length > 100 && (
+              <div style={{ textAlign: 'center', padding: '10px', fontSize: 12, color: '#64748b' }}>
+                Showing 100 of {dormant30.length}. Download CSV to see all.
+              </div>
+            )}
+          </div>
+        )}
+      </OICard>
+
+      {/* ── 4. Wallet Balance Overview ── */}
+      <OICard>
+        <OIHead $color="linear-gradient(135deg, #d1fae5, #a7f3d0)">
+          <OITitle>
+            {WALLET_ICON} Wallet Balance Overview
+            <OIBadge $color="#059669">{walletUsers.length} users with balance</OIBadge>
+            <OIBadge $color="#065f46">₹{totalWalletBalance.toLocaleString('en-IN')} total</OIBadge>
+          </OITitle>
+          <ExportBtnRow>
+            <ExportBtn $variant="green" onClick={exportWallet}>⬇ Download Excel/CSV</ExportBtn>
+            <ExportBtn $variant="blue" onClick={() => {
+              const headers = ['Customer ID', 'Name', 'Phone', 'Email', 'Wallet Balance (₹)', 'Total Orders', 'Default Address'];
+              const rows = walletUsers.map(u => [u.customerId || u.id, uName(u), uPhone(u), u.email || '', u.wallet_balance || 0, uOrders(u), uAddr(u)]);
+              openGoogleSheets(buildCSV(headers, rows));
+            }}>📊 Open in Google Sheets</ExportBtn>
+          </ExportBtnRow>
+        </OIHead>
+        {walletUsers.length === 0
+          ? <EmptyRow>No users with wallet balance</EmptyRow>
+          : (
+          <div style={{ overflowX: 'auto' }}>
+            <OITable>
+              <thead>
+                <tr>
+                  <OITh>#</OITh>
+                  <OITh>Customer</OITh>
+                  <OITh>Phone</OITh>
+                  <OITh>Email</OITh>
+                  <OITh style={{ textAlign: 'right' }}>Wallet Balance</OITh>
+                  <OITh style={{ textAlign: 'center' }}>Orders</OITh>
+                  <OITh>Actions</OITh>
+                </tr>
+              </thead>
+              <tbody>
+                {walletUsers.slice(0, 200).map((u, i) => (
+                  <tr key={u.id}>
+                    <OITd style={{ color: '#94a3b8', fontSize: 11 }}>{i + 1}</OITd>
+                    <OITd>
+                      <div style={{ fontWeight: 600 }}>{uName(u)}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>{u.customerId || u.id}</div>
+                    </OITd>
+                    <OITd><CLink href={`tel:${uPhone(u)}`}>{uPhone(u)}</CLink></OITd>
+                    <OITd style={{ fontSize: 11 }}>{u.email || '—'}</OITd>
+                    <OITd style={{ textAlign: 'right' }}>
+                      <span style={{ background: '#d1fae5', color: '#065f46', borderRadius: 8, padding: '3px 10px', fontWeight: 700 }}>
+                        ₹{(u.wallet_balance || 0).toLocaleString('en-IN')}
+                      </span>
+                    </OITd>
+                    <OITd style={{ textAlign: 'center' }}>{uOrders(u)}</OITd>
+                    <OITd>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <CLink href={`tel:${uPhone(u)}`} title="Call">📞</CLink>
+                        <CLink href={`https://wa.me/${uPhone(u).replace(/\D/g, '')}`} target="_blank" title="WhatsApp">💬</CLink>
+                        <CLink href={`/admin/users?customerId=${u.customerId || u.id}`} title="View profile">👤</CLink>
+                      </div>
+                    </OITd>
+                  </tr>
+                ))}
+              </tbody>
+            </OITable>
+            <div style={{ padding: '12px 20px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#475569' }}>
+              <span>Showing top {Math.min(200, walletUsers.length)} of {walletUsers.length} users with wallet balance</span>
+              <span style={{ fontWeight: 700, color: '#059669' }}>Total locked: ₹{totalWalletBalance.toLocaleString('en-IN')}</span>
+            </div>
+          </div>
+        )}
+      </OICard>
+    </OISection>
   );
 }

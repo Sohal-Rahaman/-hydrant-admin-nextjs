@@ -18,9 +18,9 @@ export const metadata: Metadata = {
   title: "Hydrant Admin Dashboard",
   description: "Complete water delivery service management system",
   icons: {
-    icon: '/logo.jpeg',
-    shortcut: '/logo.jpeg',
-    apple: '/logo.jpeg',
+    icon: '/hydrantlogo.png',
+    shortcut: '/hydrantlogo.png',
+    apple: '/hydrantlogo.png',
   },
 };
 

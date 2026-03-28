@@ -19,7 +19,7 @@ export default function GlobalError({
         </pre>
         <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
           <button
-            onClick={() => reset()}
+            onClick={() => typeof reset === 'function' && reset()}
             style={{ padding: '10px 20px', cursor: 'pointer' }}
           >
             Try again

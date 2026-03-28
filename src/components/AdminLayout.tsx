@@ -28,7 +28,8 @@ import {
   FiDollarSign,
   FiAlertCircle,
   FiMessageSquare,
-  FiShoppingCart
+  FiShoppingCart,
+  FiGift
 } from 'react-icons/fi';
 import { useAuth } from '@/context/AuthContext';
 
@@ -40,7 +41,7 @@ const LayoutContainer = styled.div`
 
 const Sidebar = styled.div<{ $isOpen: boolean }>`
   width: 280px;
-  background: linear-gradient(180deg, #8e2de2 0%, #4a00e0 100%);
+  background: #124D34;
   color: white;
   padding: 0;
   position: fixed;
@@ -48,8 +49,10 @@ const Sidebar = styled.div<{ $isOpen: boolean }>`
   left: 0;
   top: 0;
   z-index: 1000;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   transition: transform 0.3s ease;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);
 
   @media (max-width: 1024px) {
     width: 100%;
@@ -85,9 +88,10 @@ const LogoImage = styled(Image)`
 `;
 
 const BrandText = styled.span`
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: white;
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: #A7F3D0;
+  letter-spacing: -0.5px;
 `;
 
 const CloseButton = styled.button`
@@ -112,41 +116,47 @@ const CloseButton = styled.button`
 
 const NavMenu = styled.nav`
   padding: 20px 0;
+  flex: 1;
+  overflow-y: auto;
+  
+  /* Custom Scrollbar for premium feel */
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(167, 243, 208, 0.1);
+    border-radius: 10px;
+  }
 `;
 
 const NavItem = styled.button<{ $active?: boolean }>`
-  width: 100%;
-  padding: 15px 25px;
+  width: calc(100% - 30px);
+  margin: 4px 15px;
+  padding: 12px 20px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 15px;
-  font-size: 1rem;
-  transition: all 0.3s ease;
-  border-left: 4px solid transparent;
-  min-height: 48px; /* Touch-friendly height */
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  border-radius: 12px;
   user-select: none;
   background: none;
   border: none;
-  color: white;
+  color: rgba(255, 255, 255, 0.7);
   text-align: left;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(167, 243, 208, 0.05);
+    color: white;
   }
   
-  &:active {
-    background: rgba(255, 255, 255, 0.2);
-  }
-  
-  &:focus {
-    outline: 2px solid rgba(255, 255, 255, 0.5);
-    outline-offset: -2px;
-  }
-
   ${props => props.$active && `
-    background: rgba(255, 255, 255, 0.15);
-    border-left-color: white;
+    background: #A7F3D0;
+    color: #124D34;
+    font-weight: 700;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   `}
 
   svg {
@@ -160,12 +170,9 @@ const NavItem = styled.button<{ $active?: boolean }>`
 `;
 
 const UserInfo = styled.div`
-  position: absolute;
-  bottom: 20px;
-  left: 0;
-  right: 0;
   padding: 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid rgba(167, 243, 208, 0.1);
 `;
 
 const UserProfile = styled.div`
@@ -198,21 +205,23 @@ const UserRole = styled.div`
 
 const LogoutButton = styled.button`
   width: 100%;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: white;
-  padding: 10px;
-  border-radius: 8px;
+  background: rgba(167, 243, 208, 0.1);
+  border: 1px solid rgba(167, 243, 208, 0.2);
+  color: #A7F3D0;
+  padding: 12px;
+  border-radius: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  font-size: 0.9rem;
+  gap: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
   transition: all 0.3s ease;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(167, 243, 208, 0.2);
+    transform: translateY(-1px);
   }
 `;
 
@@ -314,6 +323,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { path: '/admin/crm', label: 'CRM & Leads', icon: FiBriefcase },
     { path: '/admin/subscriptions', label: 'Subscriptions', icon: FiRepeat },
     { path: '/admin/wallet', label: 'Wallet Mgmt', icon: FiCreditCard },
+    { path: '/admin/referrals', label: 'Referrals', icon: FiGift },
     { path: '/admin/jars', label: 'Jar Holdings', icon: FiArchive },
     { path: '/admin/trials', label: 'Trial Customers', icon: FiFlag },
     { path: '/admin/dues', label: 'Due Amounts', icon: FiAlertCircle },
@@ -386,7 +396,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         <SidebarHeader>
           <Logo>
             <LogoImage 
-              src="/logo.jpeg" 
+              src="/hydrantlogo.png" 
               alt="Hydrant Logo"
               width={45}
               height={45}
@@ -417,7 +427,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         <UserInfo>
           <UserProfile>
             <UserAvatar 
-              src={userData?.photoURL || '/logo.jpeg'} 
+              src={userData?.photoURL || '/hydrantlogo.png'} 
               alt="User Avatar"
               width={40}
               height={40}
@@ -441,7 +451,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
           </MenuButton>
           <MobileTitle>
             <MobileLogo 
-              src="/logo.jpeg" 
+              src="/hydrantlogo.png" 
               alt="Hydrant Logo"
               width={30}
               height={30}

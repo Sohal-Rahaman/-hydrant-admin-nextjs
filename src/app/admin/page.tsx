@@ -14,7 +14,8 @@ import {
   FiMapPin,
   FiCalendar,
   FiClock,
-  FiInfo
+  FiInfo,
+  FiUser
 } from 'react-icons/fi';
 import { 
   subscribeToCollection, 
@@ -48,17 +49,19 @@ const ChartsGrid = styled.div`
 
 const ChartCard = styled(motion.div)`
   background: white;
-  border-radius: 15px;
-  padding: 20px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  border-radius: 24px;
+  padding: 30px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
   border: 1px solid #f0f0f0;
 
   h3 {
     margin-top: 0;
-    margin-bottom: 20px;
-    color: #333;
-    font-size: 1.1rem;
-    font-weight: 600;
+    margin-bottom: 25px;
+    color: #124D34;
+    font-size: 1.2rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
   }
 `;
 
@@ -85,10 +88,11 @@ const DashboardLogo = styled(Image)`
 `;
 
 const Title = styled.h1`
-  color: #333;
+  color: #124D34;
   margin: 0;
-  font-size: 2rem;
-  font-weight: 700;
+  font-size: 2.2rem;
+  font-weight: 900;
+  letter-spacing: -0.5px;
 `;
 
 const ActionButtons = styled.div`
@@ -98,21 +102,23 @@ const ActionButtons = styled.div`
 `;
 
 const ActionButton = styled(motion.button)`
-  background: linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%);
+  background: #124D34;
   color: white;
   border: none;
-  padding: 12px 20px;
-  border-radius: 10px;
+  padding: 12px 24px;
+  border-radius: 14px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 600;
+  gap: 10px;
+  font-weight: 700;
   transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(18, 77, 52, 0.2);
 
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(142, 45, 226, 0.4);
+    background: #1A5F45;
+    box-shadow: 0 6px 16px rgba(18, 77, 52, 0.3);
   }
 
   &:disabled {
@@ -131,11 +137,15 @@ const StatsGrid = styled.div`
 const StatCard = styled(motion.div)<{ color?: string }>`
   background: white;
   padding: 30px;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border-radius: 24px;
+  box-shadow: 0 4px 20px rgba(18, 77, 52, 0.05);
   border: 1px solid #f0f0f0;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 200px;
 
   &::before {
     content: '';
@@ -143,8 +153,8 @@ const StatCard = styled(motion.div)<{ color?: string }>`
     top: 0;
     left: 0;
     right: 0;
-    height: 4px;
-    background: ${props => props.color || 'linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)'};
+    height: 6px;
+    background: ${props => props.color || 'linear-gradient(135deg, #124D34 0%, #1A5F45 100%)'};
   }
 `;
 
@@ -156,22 +166,23 @@ const StatHeader = styled.div`
 `;
 
 const StatIcon = styled.div<{ color?: string }>`
-  width: 60px;
-  height: 60px;
-  border-radius: 12px;
-  background: ${props => props.color || 'linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)'};
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: ${props => props.color || 'rgba(18, 77, 52, 0.08)'};
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
-  font-size: 1.5rem;
+  color: ${props => props.color ? 'white' : '#124D34'};
+  font-size: 1.4rem;
 `;
 
 const StatValue = styled.div`
-  font-size: 2.5rem;
-  font-weight: 700;
-  color: #333;
-  margin-bottom: 8px;
+  font-size: 3.5rem;
+  font-weight: 900;
+  color: #124D34;
+  margin-bottom: 4px;
+  letter-spacing: -2px;
 `;
 
 const StatLabel = styled.div`
@@ -202,9 +213,9 @@ const AnalyticsGrid = styled.div`
 
 const AnalyticsCard = styled(motion.div)`
   background: white;
-  padding: 30px;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  padding: 35px;
+  border-radius: 24px;
+  box-shadow: 0 4px 25px rgba(18, 77, 52, 0.04);
   border: 1px solid #f0f0f0;
 `;
 
@@ -350,7 +361,10 @@ export default function AdminDashboard() {
     newCustomers: 0,
     totalOrders: 0,
     totalUsers: 0,
-    totalRevenue: 0
+    totalRevenue: 0,
+    expressCount: 0,
+    subscriptionCount: 0,
+    normalCount: 0
   });
 
   const [chartData, setChartData] = useState<{
@@ -373,6 +387,13 @@ interface OrderData {
   address?: {
     pincode: string;
   };
+  deliveryPartner?: {
+    name: string;
+    phone: string;
+  };
+  priority?: number;
+  orderType?: string;
+  sla_deadline?: any;
 }
 
 interface UserData {
@@ -509,7 +530,10 @@ const toDate = (dateValue: any): Date => {
             newCustomers: liveStats.newCustomersToday || 0,
             totalOrders: liveStats.totalOrders || 0,
             totalUsers: liveStats.totalUsers || 0,
-            totalRevenue: liveStats.totalRevenue || 0
+            totalRevenue: liveStats.totalRevenue || 0,
+            expressCount: liveStats.expressCount || 0,
+            subscriptionCount: liveStats.subscriptionCount || 0,
+            normalCount: liveStats.normalCount || 0
           });
           
           console.log('✅ Stats updated successfully with values:', {
@@ -782,6 +806,10 @@ const toDate = (dateValue: any): Date => {
     }, 0);
     const totalRevenue = totalDeliveredQuantity * 37;
 
+    const expressCount = ordersData.filter(o => o.priority === 2 && (o.status === 'pending' || o.status === 'processing')).length;
+    const subscriptionCount = ordersData.filter(o => o.priority === 1 && (o.status === 'pending' || o.status === 'processing')).length;
+    const normalCount = ordersData.filter(o => (o.priority === 0 || o.priority === undefined) && (o.status === 'pending' || o.status === 'processing')).length;
+
     console.log('📊 Dashboard Statistics Calculated:', {
       todayOrders: todayOrders.length,
       todayDeliveredOrders: todayDeliveredOrders.length,
@@ -792,7 +820,10 @@ const toDate = (dateValue: any): Date => {
       totalOrders,
       totalUsers,
       totalDeliveredQuantity,
-      totalRevenue
+      totalRevenue,
+      expressCount,
+      subscriptionCount,
+      normalCount
     });
 
     setStats({
@@ -801,7 +832,10 @@ const toDate = (dateValue: any): Date => {
       newCustomers: newCustomersToday,
       totalOrders: totalOrders,
       totalUsers: totalUsers,
-      totalRevenue: totalRevenue
+      totalRevenue: totalRevenue,
+      expressCount,
+      subscriptionCount,
+      normalCount
     });
   };
 
@@ -889,7 +923,7 @@ Check console for detailed logs`);
       <Header>
         <TitleSection>
           <DashboardLogo 
-            src="/logo.jpeg" 
+            src="/hydrantlogo.png" 
             alt="Hydrant Logo"
             width={50}
             height={50}
@@ -933,21 +967,29 @@ Check console for detailed logs`);
           <h3>Orders Overview (Last 7 Days)</h3>
           <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer>
-              <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorOrders" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
-                />
-                <Area type="monotone" dataKey="orders" name="Total Orders" stroke="#3b82f6" fillOpacity={1} fill="url(#colorOrders)" />
-              </AreaChart>
+            <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="colorOrders" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#124D34" stopOpacity={0.1}/>
+                  <stop offset="95%" stopColor="#124D34" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#666', fontSize: 12}} />
+              <YAxis axisLine={false} tickLine={false} tick={{fill: '#666', fontSize: 12}} />
+              <Tooltip 
+                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="orders" 
+                name="Total Orders"
+                stroke="#124D34" 
+                strokeWidth={3}
+                fillOpacity={1} 
+                fill="url(#colorOrders)" 
+              />
+            </AreaChart>
             </ResponsiveContainer>
           </div>
         </ChartCard>
@@ -961,14 +1003,14 @@ Check console for detailed logs`);
           <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer>
               <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} allowDecimals={false} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#666', fontSize: 12}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fill: '#666', fontSize: 12}} allowDecimals={false} />
                 <Tooltip 
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                   cursor={{ fill: '#f3f4f6' }}
                 />
-                <Bar dataKey="newUsers" name="New Users" fill="#10b981" radius={[4, 4, 0, 0]} barSize={30} />
+                <Bar dataKey="newUsers" name="New Users" fill="#10B981" radius={[6, 6, 0, 0]} barSize={30} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1008,11 +1050,20 @@ Check console for detailed logs`);
               <StatValue>{stats.openOrders}</StatValue>
               <StatLabel>Processing Orders</StatLabel>
               <StatTrend>
-                <FiClock />
-                Pending + Processing status
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                  <span style={{ fontSize: '0.7rem', background: '#fee2e2', color: '#ef4444', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                    🚀 {stats.expressCount}
+                  </span>
+                  <span style={{ fontSize: '0.7rem', background: '#dcfce7', color: '#16a34a', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                    ♻️ {stats.subscriptionCount}
+                  </span>
+                  <span style={{ fontSize: '0.7rem', background: '#f3f4f6', color: '#475569', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                    📦 {stats.normalCount}
+                  </span>
+                </div>
               </StatTrend>
             </div>
-            <StatIcon color="linear-gradient(135deg, #f59e0b 0%, #d97706 100%)">
+            <StatIcon color="#124D34">
               <FiPackage />
             </StatIcon>
           </StatHeader>
@@ -1033,7 +1084,7 @@ Check console for detailed logs`);
                 Joined within 24 hours
               </StatTrend>
             </div>
-            <StatIcon color="linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)">
+            <StatIcon color="#124D34">
               <FiUsers />
             </StatIcon>
           </StatHeader>
@@ -1096,7 +1147,7 @@ Check console for detailed logs`);
                 All completed orders × ₹37
               </StatTrend>
             </div>
-            <StatIcon color="linear-gradient(135deg, #059669 0%, #047857 100%)">
+            <StatIcon color="#124D34">
               <FiDollarSign />
             </StatIcon>
           </StatHeader>
@@ -1193,6 +1244,17 @@ Check console for detailed logs`);
                         'No date'
                       }
                     </OrderDetails>
+                    {order.deliveryPartner && (
+                      <div style={{ 
+                        fontSize: '0.75rem', color: '#059669', marginTop: '6px', 
+                        display: 'flex', alignItems: 'center', gap: '6px',
+                        background: '#f0fdf4', padding: '4px 8px', borderRadius: '6px',
+                        width: 'fit-content', border: '1px solid #dcfce7'
+                      }}>
+                        <FiUser size={12} />
+                        <span style={{ fontWeight: '700' }}>{order.deliveryPartner.name}</span>
+                      </div>
+                    )}
                   </OrderInfo>
                   <div style={{ textAlign: 'right' }}>
                     <OrderStatus status={order.status || 'pending'}>

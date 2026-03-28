@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,6 +19,7 @@ import { normalizeOrderStatus } from '@/lib/orderStatus';
 import { collection, getDocs } from 'firebase/firestore';
 import { logActivity } from '@/lib/activityLogger';
 import { useAuth } from '@/context/AuthContext';
+import { DeliveryHandoverModal } from '@/components/DeliveryHandoverModal';
 
 interface Order {
   id: string;
@@ -51,6 +53,18 @@ interface Order {
   };
   updatedAt?: Date | { toDate(): Date } | string;
   autoAssignAttempted?: boolean;
+  priority?: number;
+  sla_deadline?: Date | { toDate(): Date } | string;
+  items?: any[];
+  raw?: any;
+  handover?: {
+    deliveredJars: number;
+    collectedJars: number;
+    netChange: number;
+    proofImage?: string | null;
+    notes?: string;
+    completedAt: Date | { toDate(): Date } | string;
+  };
 }
 
 
@@ -155,6 +169,24 @@ const OrderStatus = styled.span<{ status: string }>`
       default: return 'background: #fee2e2; color: #991b1b;';
     }
   }}
+`;
+
+const PriorityBadge = styled.span<{ priority: number }>`
+  padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700;
+  display: flex; align-items: center; gap: 4px; border: 1px solid transparent;
+  ${props => {
+    switch (props.priority) {
+      case 2: return 'background: #fee2e2; color: #dc2626; border-color: #fecaca;';
+      case 1: return 'background: #f0f9ff; color: #0284c7; border-color: #bae6fd;';
+      default: return 'background: #f3f4f6; color: #4b5563; border-color: #e5e7eb;';
+    }
+  }}
+`;
+
+const SLATag = styled.div<{ $isBreached: boolean }>`
+  font-size: 0.75rem; font-weight: 600; margin-top: 8px;
+  display: flex; align-items: center; gap: 4px;
+  color: ${props => props.$isBreached ? '#dc2626' : '#6b7280'};
 `;
 
 const OrderActions = styled.div`display: flex; gap: 8px; margin-top: 15px; flex-wrap: wrap;`;
@@ -318,10 +350,27 @@ export default function OrdersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [delivery, setDelivery] = useState({ jarReturned: false, paymentReceived: false, notes: '' });
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [activeTab, setActiveTab] = useState<'open' | 'completed' | 'cancelled'>('open');
+  const searchParams = useSearchParams();
+  const orderIdParam = searchParams.get('orderId');
+  const router = useRouter();
+
+  useEffect(() => {
+    if (orderIdParam && orders.length > 0) {
+      setSearchTerm(orderIdParam);
+      // Also switch to 'all' or appropriate tab if needed, 
+      // but setSearchTerm filters globally across the currently selected tab in some implementations.
+      // In this one, filteredOrders depends on activeTab, so let's make sure it's visible.
+      const order = orders.find(o => o.id === orderIdParam);
+      if (order) {
+        if (order.status === 'completed' || order.status === 'delivered') setActiveTab('completed');
+        else if (order.status === 'cancelled') setActiveTab('cancelled');
+        else setActiveTab('open');
+      }
+    }
+  }, [orderIdParam, orders]);
   const [bulkPartner, setBulkPartner] = useState('');
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
   
@@ -386,36 +435,62 @@ export default function OrdersPage() {
             return pincodeMatch ? pincodeMatch[1] : 'UNKNOWN';
           };
 
+          const totalQty = data.items?.reduce((acc: number, item: any) => acc + (item.quantity || 0), 0) || data.quantity || 1;
+          const totalAmt = data.total || data.amount || data.items?.reduce((acc: number, item: any) => acc + (item.price || item.amount || 0), 0) || (totalQty * 37);
+
+          const rawAddr = data.deliveryAddress || data.address;
+          const getString = (val: any) => typeof val === 'string' ? val : '';
+          
+          let addrFull = '';
+          let addrStreet = '';
+          let addrPincode = '';
+
+          if (typeof rawAddr === 'string') {
+            addrFull = rawAddr;
+            addrStreet = rawAddr;
+            addrPincode = extractPincodeFromAddress(rawAddr);
+          } else if (rawAddr && typeof rawAddr === 'object') {
+            addrFull = getString(rawAddr.fullAddress || rawAddr.full || '');
+            addrStreet = getString(rawAddr.street || rawAddr.area || addrFull);
+            addrPincode = getString(rawAddr.pincode || '');
+            if (!addrPincode && addrFull) addrPincode = extractPincodeFromAddress(addrFull);
+          }
+
           const mappedOrder: Order = {
             id: doc.id,
-            userId: data.userId || data.customerId || '',
-            userName: data.customerName || data.userName || '',
-            userPhone: data.customerPhone || data.phoneNumber || '',
-            status: data.status || 'pending',
-            quantity: data.items?.[0]?.quantity || data.quantity || 1,
-            amount: data.total || data.amount || (data.items?.[0]?.quantity || 1) * 37,
+            userId: String(data.userId || data.customerId || ''),
+            userName: String(data.customerName || data.userName || data.full_name || data.name || ''),
+            userPhone: String(data.customerPhone || data.phoneNumber || data.phone || ''),
+            status: String(data.status || 'pending'),
+            quantity: totalQty,
+            amount: totalAmt,
             address: {
-              street: data.deliveryAddress?.fullAddress || '',
-              city: '',
-              pincode: extractPincodeFromAddress(data.deliveryAddress?.fullAddress || ''),
-              full: data.deliveryAddress?.fullAddress || ''
+              street: addrStreet,
+              city: String(data.deliveryAddress?.city || data.address?.city || ''),
+              pincode: addrPincode,
+              full: addrFull
             },
             createdAt: data.createdAt || data.orderDate || data.timestamp || new Date(),
-            orderType: data.orderType || (data.subscriptionId ? 'subscription' : 'regular'),
+            orderType: String(data.orderType || (data.subscriptionId ? 'subscription' : 'regular')),
             deliverySlot: data.deliverySlot,
             deliveryDate: data.deliveryDate,
             isPriority: data.isPriority,
             assignedPartner: data.assignedPartner,
-            plusCode: data.plusCode || data.deliveryAddress?.plusCode,
-            floorNumber: data.floorNumber || data.deliveryAddress?.floor,
-            hasLift: data.hasLift ?? data.deliveryAddress?.hasLift,
-            isAddressVerified: data.isAddressVerified ?? data.deliveryAddress?.isVerified,
-            bewareOfDogs: data.bewareOfDogs ?? data.deliveryAddress?.bewareOfDogs,
-            paymentMethod: data.paymentMethod || 'cash',
-            updatedAt: data.updatedAt
+            plusCode: data.plusCode || data.deliveryAddress?.plusCode || data.address?.plusCode,
+            floorNumber: data.floorNumber || data.deliveryAddress?.floor || data.address?.floor,
+            hasLift: data.hasLift ?? data.deliveryAddress?.hasLift ?? data.address?.hasLift,
+            isAddressVerified: data.isAddressVerified ?? data.deliveryAddress?.isVerified ?? data.address?.isVerified,
+            bewareOfDogs: data.bewareOfDogs ?? data.deliveryAddress?.bewareOfDogs ?? data.address?.bewareOfDogs,
+            paymentMethod: String(data.paymentMethod || 'cash'),
+            deliveryPartner: data.deliveryPartner,
+            updatedAt: data.updatedAt,
+            priority: data.priority ?? 0,
+            sla_deadline: data.sla_deadline,
+            items: data.items || [],
+            raw: data
           };
 
-          mappedOrder.status = normalizeOrderStatus(data.status || mappedOrder.status);
+          mappedOrder.status = normalizeOrderStatus(String(data.status || mappedOrder.status));
           return mappedOrder;
         }).filter((order) => order.id).sort((a, b) => {
           const getTimestamp = (date: Date | { toDate(): Date } | string): number => {
@@ -645,10 +720,19 @@ export default function OrdersPage() {
       } catch { return null; }
     };
 
+    const now = new Date();
     const deliveryDate = getOrderDate(order.deliveryDate || order.createdAt);
     if (!deliveryDate) return false;
 
-    const now = new Date();
+    // 1. Check for SLA breach if field exists (Robust Phase 6 Logic)
+    if (order.sla_deadline) {
+      const deadline = typeof order.sla_deadline === 'object' && 'toDate' in order.sla_deadline 
+        ? order.sla_deadline.toDate() 
+        : new Date(order.sla_deadline as string);
+      return now > deadline;
+    }
+    
+    // 2. Fallback to Legacy Logic
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     
     // Check if order is from a previous day (Past due is always delayed)
@@ -743,7 +827,6 @@ export default function OrdersPage() {
 
   const handleDeliveryClick = (order: Order) => {
     setSelectedOrder(order);
-    setDelivery({ jarReturned: false, paymentReceived: false, notes: '' });
     setShowModal(true);
   };
 
@@ -777,33 +860,42 @@ export default function OrdersPage() {
     }
   };
 
-  const handleMarkDelivered = async () => {
+  const handleMarkDelivered = async (handoverData: any) => {
     if (!selectedOrder) return;
     setProcessing(true);
     try {
       const user = getUserDetails(selectedOrder.userId);
+      const { deliveredJars, collectedJars, amountPaid, notes } = handoverData;
       
-      // LOGIC: If Cash and NOT received, deduct from wallet (debt). 
-      // If Wallet/UPI or Paid Cash, no deduction needed as it's already accounted for or collected.
-      const isUnpaidCash = selectedOrder.paymentMethod === 'cash' && !delivery.paymentReceived;
-      const walletChange = isUnpaidCash ? -(selectedOrder.quantity * 37) : 0;
-      
-      const holdJarsChange = delivery.jarReturned ? 0 : selectedOrder.quantity;
+      const originalQty = selectedOrder.quantity || 1;
+      const originalAmount = selectedOrder.amount || 0;
+      const unitPrice = originalAmount / originalQty;
+      const newAmount = unitPrice * deliveredJars;
+
+      // Calculation: How much was already paid?
+      const alreadyPaid = (selectedOrder.paymentMethod !== 'cash') ? (selectedOrder.amount || 0) : 0;
+      const remainingDue = newAmount - alreadyPaid;
+      const unpaidAmount = remainingDue - amountPaid;
+      const holdJarsChange = deliveredJars - collectedJars;
 
       await updateDocument('orders', selectedOrder.id, {
         status: 'completed',
         deliveredAt: new Date(),
-        updatedAt: new Date(),
-        deliveryNotes: delivery.notes,
-        jarReturned: delivery.jarReturned,
-        paymentReceived: delivery.paymentReceived
+        handover: {
+          deliveredJars: deliveredJars,
+          collectedJars: collectedJars,
+          netChange: holdJarsChange,
+          completedAt: new Date(),
+          notes: notes,
+          amountPaid: amountPaid
+        },
+        amount: newAmount,
       });
 
       if (user) {
         await updateDocument('users', user.id, {
-          wallet_balance: user.wallet_balance + walletChange,
-          jars_occupied: user.jars_occupied + holdJarsChange,
-          updatedAt: new Date()
+          wallet_balance: (user.wallet_balance || 0) - unpaidAmount,
+          jars_occupied: (user.jars_occupied || 0) + holdJarsChange
         });
       }
 
@@ -812,13 +904,14 @@ export default function OrdersPage() {
         actor: 'ADMIN',
         actorName: 'Admin',
         actorId: 'admin_panel',
-        details: `Order marked as delivered. Payment: ${delivery.paymentReceived ? 'Received' : 'Not Received'}`,
+        details: `Order #${selectedOrder.id} marked as delivered. Jars net: ${holdJarsChange}, Amount: ₹${newAmount}`,
         targetId: selectedOrder.id,
       });
-
-      setShowModal(false);
+      
+      // We don't call setShowModal(false) here because Step 4 (Success) is handled inside the component
     } catch (err) {
-      alert('Error updating order.');
+      console.error(err);
+      alert('Failed to update order status');
     } finally {
       setProcessing(false);
     }
@@ -970,15 +1063,11 @@ export default function OrdersPage() {
           boxShadow: '0 10px 30px rgba(239, 68, 68, 0.15)'
         } : {}}
       >
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
-          {order.isPriority && (
-            <div style={{ 
-              background: '#ef4444', color: 'white', padding: '4px 12px', borderRadius: '20px', 
-              fontSize: '0.75rem', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px',
-              boxShadow: '0 2px 4px rgba(239, 68, 68, 0.3)'
-            }}>
-              🚀 FAST DELIVERY
-            </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px', alignItems: 'center' }}>
+          {order.priority !== undefined && (
+            <PriorityBadge priority={order.priority}>
+              {order.priority === 2 ? '🚀 EXPRESS' : order.priority === 1 ? '♻️ SUBSCRIPTION' : '📦 NORMAL'}
+            </PriorityBadge>
           )}
           {isDelayed && (
             <div style={{ 
@@ -986,14 +1075,17 @@ export default function OrdersPage() {
               fontSize: '0.75rem', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px',
               boxShadow: '0 2px 4px rgba(239, 68, 68, 0.3)', display: 'flex', alignItems: 'center', gap: '4px'
             }}>
-              ⚠️ DELAYED
+              ⚠️ SLA BREACH
             </div>
           )}
         </div>
         
         <OrderHeader>
           <OrderInfo>
-            <OrderCustomer>
+            <OrderCustomer 
+              onClick={() => router.push(`/admin/users?customerId=${order.userId}`)} 
+              style={{ cursor: 'pointer', color: '#6366f1', textDecoration: 'underline' }}
+            >
               <FiUser size={16} />
               {name}
             </OrderCustomer>
@@ -1052,6 +1144,32 @@ export default function OrdersPage() {
                   </div>
                 )}
               </div>
+
+              {order.deliveryPartner && (
+                <div style={{ 
+                  marginTop: '12px', padding: '12px', background: '#ecfdf5', borderRadius: '12px',
+                  border: '1px solid #10b981', display: 'flex', alignItems: 'center', gap: '12px',
+                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.1)'
+                }}>
+                  <div style={{ 
+                    width: '36px', height: '36px', borderRadius: '50%', background: '#10b981', 
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white'
+                  }}>
+                    <FiUser size={18} style={{ margin: '0 auto' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '0.65rem', color: '#059669', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Assigned Partner</div>
+                    <div style={{ fontSize: '1rem', fontWeight: '800', color: '#064e3b' }}>{order.deliveryPartner.name}</div>
+                  </div>
+                </div>
+              )}
+
+              {order.sla_deadline && (
+                <SLATag $isBreached={isDelayed}>
+                  <FiClock size={12} /> 
+                  SLA: {formatDate(order.sla_deadline)}
+                </SLATag>
+              )}
 
               <div style={{ color: '#94a3b8', fontSize: '0.7rem', marginTop: '12px', fontWeight: '600' }}>
                 ID: {order.id} | Placed: {formatDate(order.createdAt)}
@@ -1118,7 +1236,7 @@ export default function OrdersPage() {
     <Container>
       <Header>
         <TitleSection>
-          <OrdersLogo src="/logo.jpeg" alt="Logo" width={45} height={45} />
+          <OrdersLogo src="/hydrantlogo.png" alt="Logo" width={45} height={45} />
           <Title><FiPackage />Orders</Title>
         </TitleSection>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -1212,31 +1330,15 @@ export default function OrdersPage() {
 
       <AnimatePresence>
         {showModal && selectedOrder && (
-          <Modal initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <ModalContent initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}>
-              <CloseBtn onClick={() => setShowModal(false)}><FiX /></CloseBtn>
-              <ModalHeader><ModalTitle>Complete Delivery</ModalTitle></ModalHeader>
-              <ModalBody>
-                <div style={{ marginBottom: '15px' }}>Order #{selectedOrder.id} - {selectedOrder.userName}</div>
-                <CheckboxGroup>
-                  <Checkbox type="checkbox" checked={delivery.jarReturned} onChange={(e) => setDelivery(p => ({ ...p, jarReturned: e.target.checked }))} />
-                  <Label>Jar Returned</Label>
-                </CheckboxGroup>
-                <CheckboxGroup>
-                  <Checkbox type="checkbox" checked={delivery.paymentReceived} onChange={(e) => setDelivery(p => ({ ...p, paymentReceived: e.target.checked }))} />
-                  <Label>Payment Received</Label>
-                </CheckboxGroup>
-                <TextArea placeholder="Notes..." value={delivery.notes} onChange={(e) => setDelivery(p => ({ ...p, notes: e.target.value }))} />
-                <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
-                  <ActionButton variant="primary" onClick={handleMarkDelivered} disabled={processing}>Confirm</ActionButton>
-                  <ActionButton onClick={() => setShowModal(false)}>Cancel</ActionButton>
-                </div>
-              </ModalBody>
-            </ModalContent>
-          </Modal>
+          <DeliveryHandoverModal 
+            order={selectedOrder}
+            onClose={() => setShowModal(false)}
+            onComplete={handleMarkDelivered}
+            processing={processing}
+          />
         )}
 
-        {showQRModal && selectedQRCodeOrder && (
+        {showQRModal && selectedQRCodeOrder ? (
           <Modal initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <ModalContent initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} style={{ maxWidth: '400px', textAlign: 'center' }}>
               <CloseBtn onClick={() => setShowQRModal(false)}><FiX /></CloseBtn>
@@ -1276,7 +1378,7 @@ export default function OrdersPage() {
               </ModalBody>
             </ModalContent>
           </Modal>
-        )}
+        ) : null}
       </AnimatePresence>
     </Container>
   );
