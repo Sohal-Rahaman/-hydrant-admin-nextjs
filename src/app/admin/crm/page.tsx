@@ -1,14 +1,15 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import styled from 'styled-components';
-import { motion, AnimatePresence } from 'framer-motion';
-import { FiPhone, FiMessageCircle, FiBell, FiDollarSign, FiClock, FiBox, FiUsers, FiSearch } from 'react-icons/fi';
+import { motion } from 'framer-motion';
+import { FiPhone, FiMessageCircle, FiBox, FiUsers, FiSearch, FiStar, FiClock, FiDollarSign, FiActivity, FiAlertCircle } from 'react-icons/fi';
 import { subscribeToCollection } from '@/lib/firebase';
+import UserInsightDrawer from './UserInsightDrawer';
 
 // Interfaces
 interface User {
   id: string;
+  customerId?: string;
   name?: string;
   full_name?: string;
   firstName?: string;
@@ -18,205 +19,24 @@ interface User {
   email?: string;
   jars_occupied?: number;
   jarHold?: number;
+  wallet_balance?: number;
   lastOrderDate?: any;
   createdAt?: any;
+  __ltv?: number;
+  __totalOrders?: number;
 }
 
 interface Order {
   id: string;
+  userId?: string;
+  customerId?: string;
   total?: number;
+  amount?: number;
   status?: string;
   createdAt?: any;
   deliveryDate?: any;
 }
 
-// Styled Components
-const PageContainer = styled.div`
-  padding: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
-`;
-
-const Header = styled.div`
-  margin-bottom: 24px;
-`;
-
-const Title = styled.h1`
-  font-size: 24px;
-  font-weight: 700;
-  color: #1f2937;
-  margin: 0 0 8px 0;
-`;
-
-const Subtitle = styled.p`
-  color: #6b7280;
-  font-size: 14px;
-  margin: 0;
-`;
-
-const MetricsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 20px;
-  margin-bottom: 32px;
-`;
-
-const MetricCard = styled(motion.div)`
-  background: white;
-  padding: 24px;
-  border-radius: 16px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  border: 1px solid #f3f4f6;
-  transition: transform 0.2s;
-
-  &:hover {
-    transform: translateY(-2px);
-  }
-`;
-
-const IconWrapper = styled.div<{ $color: string; $bg: string }>`
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  color: ${props => props.$color};
-  background: ${props => props.$bg};
-`;
-
-const MetricInfo = styled.div`
-  flex: 1;
-`;
-
-const MetricValue = styled.div`
-  font-size: 24px;
-  font-weight: 700;
-  color: #111827;
-  margin-bottom: 4px;
-`;
-
-const MetricLabel = styled.div`
-  font-size: 13px;
-  color: #6b7280;
-  font-weight: 500;
-`;
-
-const TabsContainer = styled.div`
-  display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
-  background: white;
-  padding: 8px;
-  border-radius: 12px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-`;
-
-const Tab = styled.button<{ $active: boolean; $color: string }>`
-  flex: 1;
-  padding: 12px 24px;
-  border-radius: 8px;
-  border: none;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: ${props => props.$active ? props.$color : 'transparent'};
-  color: ${props => props.$active ? 'white' : '#6b7280'};
-
-  &:hover {
-    background: ${props => props.$active ? props.$color : '#f3f4f6'};
-  }
-`;
-
-const ListCard = styled.div`
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-  overflow: hidden;
-`;
-
-const UserRow = styled.div`
-  display: flex;
-  align-items: center;
-  padding: 16px 24px;
-  border-bottom: 1px solid #f3f4f6;
-
-  &:last-child {
-    border-bottom: none;
-  }
-`;
-
-const Avatar = styled.div`
-  width: 48px;
-  height: 48px;
-  border-radius: 24px;
-  background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 600;
-  margin-right: 16px;
-`;
-
-const UserDetails = styled.div`
-  flex: 1;
-`;
-
-const UserName = styled.div`
-  font-weight: 600;
-  color: #111827;
-  font-size: 15px;
-  margin-bottom: 4px;
-`;
-
-const UserSub = styled.div`
-  font-size: 13px;
-  color: #6b7280;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-`;
-
-const ActionButtons = styled.div`
-  display: flex;
-  gap: 8px;
-`;
-
-const ActionBtn = styled.button<{ $color: string }>`
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  background: ${props => props.$color}15;
-  color: ${props => props.$color};
-  transition: all 0.2s;
-  font-size: 18px;
-
-  &:hover {
-    background: ${props => props.$color}30;
-    transform: translateY(-1px);
-  }
-`;
-
-const EmptyState = styled.div`
-  padding: 48px;
-  text-align: center;
-  color: #6b7280;
-  font-size: 15px;
-`;
-
-// Helper
 const getTimestamp = (dateVal: any) => {
   if (!dateVal) return 0;
   if (typeof dateVal === 'number') return dateVal;
@@ -237,11 +57,6 @@ const formatDateSafe = (dateVal: any) => {
   });
 };
 
-const formatPhone = (phone?: string) => {
-  if (!phone) return '';
-  return phone.replace(/[^\d+]/g, '');
-};
-
 const getPhoneForWa = (phone?: string) => {
     if (!phone) return '';
     const cleanPhone = phone.replace(/[^\d]/g, '');
@@ -252,7 +67,10 @@ export default function CRMScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'HEALTHY' | 'AT_RISK' | 'INACTIVE'>('AT_RISK');
+  const [activeTab, setActiveTab] = useState<'VIP' | 'HEALTHY' | 'AT_RISK' | 'INACTIVE' | 'JAR_RECOVERY'>('VIP');
+  
+  const [search, setSearch] = useState('');
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   useEffect(() => {
     const unsubUsers = subscribeToCollection('users', (snapshot) => {
@@ -273,19 +91,49 @@ export default function CRMScreen() {
     };
   }, []);
 
+  const enrichedUsers = useMemo(() => {
+    return users.map(user => {
+      const uOrders = orders.filter(o => o.userId === user.id || o.customerId === user.customerId);
+      const ltv = uOrders.reduce((sum, o) => sum + (o.total || o.amount || 0), 0);
+      return {
+        ...user,
+        __totalOrders: uOrders.length,
+        __ltv: ltv
+      };
+    });
+  }, [users, orders]);
+
   const segmentation = useMemo(() => {
     const now = Date.now();
     const oneWeek = 7 * 24 * 60 * 60 * 1000;
     const oneMonth = 30 * 24 * 60 * 60 * 1000;
 
+    const vip: User[] = [];
     const healthy: User[] = [];
     const atRisk: User[] = [];
     const inactive: User[] = [];
+    const jarRecovery: User[] = [];
 
-    users.forEach(user => {
+    enrichedUsers.forEach(user => {
       const lastOrderTs = getTimestamp(user.lastOrderDate) || getTimestamp(user.createdAt);
       const diff = now - lastOrderTs;
+      const ltv = user.__ltv || 0;
+      const tOrders = user.__totalOrders || 0;
+      const jarsHeld = user.jars_occupied || user.jarHold || 0;
 
+      // JAR RECOVERY (User is inactive but holding jars)
+      if (diff > oneMonth && jarsHeld > 0) {
+        jarRecovery.push(user);
+        return; // Prioritize Jar Recovery
+      }
+
+      // VIP (Spent > 5000 OR Orders > 20)
+      if (ltv >= 5000 || tOrders >= 20) {
+        vip.push(user);
+        return;
+      }
+
+      // Standard Segments
       if (!lastOrderTs || diff > oneMonth) {
         inactive.push(user);
       } else if (diff > oneWeek) {
@@ -295,162 +143,224 @@ export default function CRMScreen() {
       }
     });
 
-    return { HEALTHY: healthy, AT_RISK: atRisk, INACTIVE: inactive };
-  }, [users]);
+    return { VIP: vip, HEALTHY: healthy, AT_RISK: atRisk, INACTIVE: inactive, JAR_RECOVERY: jarRecovery };
+  }, [enrichedUsers]);
 
   const metrics = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-
-    const collectionToday = orders
-      .filter(o => 
-        (o.status === 'delivered' || o.status === 'completed') && 
-        (getTimestamp(o.deliveryDate) > new Date(today).getTime() || getTimestamp(o.createdAt) > new Date(today).getTime())
-      )
-      .reduce((sum, o) => sum + (o.total || 0), 0);
-
-    const deliveredOrders = orders.filter(o => (o.status === 'delivered' || o.status === 'completed') && o.createdAt && o.deliveryDate);
-    const avgDeliveryTime = deliveredOrders.length > 0
-      ? deliveredOrders.reduce((sum, o) => {
-          const created = getTimestamp(o.createdAt);
-          const delivered = getTimestamp(o.deliveryDate);
-          return sum + ((delivered - created) / (1000 * 60));
-        }, 0) / deliveredOrders.length
-      : 0;
-
+    const totalCollection = orders.reduce((sum, o) => sum + (o.total || o.amount || 0), 0);
     const totalJarsOut = users.reduce((sum, u) => sum + (Number(u.jars_occupied) || Number(u.jarHold) || 0), 0);
 
     return {
-      collectionToday,
-      avgDeliveryTime: Math.round(avgDeliveryTime),
+      totalCollection,
       totalJarsOut,
-      activeCount: segmentation.HEALTHY.length,
-      inactiveCount: segmentation.INACTIVE.length,
+      vipCount: segmentation.VIP.length,
+      riskCount: segmentation.AT_RISK.length,
+      recoveryCount: segmentation.JAR_RECOVERY.length
     };
   }, [orders, users, segmentation]);
 
-  const handleWhatsApp = (user: User) => {
+  // Tab Filtering & Search
+  let currentSegment = segmentation[activeTab] || [];
+  if (search) {
+    const q = search.toLowerCase();
+    currentSegment = currentSegment.filter(u => {
+      const name = (u.full_name || u.name || u.firstName || '').toLowerCase();
+      const cId = (u.customerId || '').toLowerCase();
+      const phone = (u.phone || u.phoneNumber || '').toLowerCase();
+      return name.includes(q) || cId.includes(q) || phone.includes(q);
+    });
+  }
+
+  // Sorting: We default sort by LTV descending, then by Orders
+  currentSegment = currentSegment.sort((a, b) => (b.__ltv || 0) - (a.__ltv || 0));
+
+  const handleWhatsApp = (e: React.MouseEvent, user: User) => {
+    e.stopPropagation();
     const phone = user.phone || user.phoneNumber;
     if (!phone) return;
     const p = getPhoneForWa(phone);
-    const message = encodeURIComponent(`Hi ${user.full_name || user.name || user.firstName}, we missed you at Hydrant! Need a water refill today? 💧`);
+    const message = encodeURIComponent(`Hi ${user.full_name || user.name || user.firstName}, Hydrant team here!`);
     window.open(`https://wa.me/${p}?text=${message}`, '_blank');
   };
 
-  const handleCall = (user: User) => {
+  const handleCall = (e: React.MouseEvent, user: User) => {
+    e.stopPropagation();
     const phone = user.phone || user.phoneNumber;
     if (!phone) return;
-    window.open(`tel:${formatPhone(phone)}`);
+    window.open(`tel:${phone.replace(/[^\d+]/g, '')}`, '_self');
   };
 
-  const currentSegment = segmentation[activeTab] || [];
-
   return (
-    <PageContainer>
-      <Header>
-        <Title>CRM & Leads</Title>
-        <Subtitle>Retention radar and operational metrics</Subtitle>
-      </Header>
+    <div className="min-h-screen bg-[#0B0E14] text-white p-6 max-w-7xl mx-auto flex flex-col gap-6">
+      
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-teal-500">Hydrant Hub CRM</h1>
+          <p className="text-gray-400 text-sm mt-1">Predictive analytics and retention engine</p>
+        </div>
+        <div className="relative w-full md:w-80">
+          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search name, phone, or ID..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full bg-[#151f32] border border-emerald-500/10 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-emerald-500/50 transition-colors"
+          />
+        </div>
+      </div>
 
-      <MetricsGrid>
-        <MetricCard>
-          <IconWrapper $color="#10b981" $bg="#10b98120">
-            <FiDollarSign />
-          </IconWrapper>
-          <MetricInfo>
-            <MetricValue>₹{metrics.collectionToday.toLocaleString()}</MetricValue>
-            <MetricLabel>Collection Today</MetricLabel>
-          </MetricInfo>
-        </MetricCard>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <motion.div whileHover={{ y: -2 }} className="bg-[#151f32] p-5 rounded-2xl border border-emerald-500/10 flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center text-emerald-400 text-xl">
+             <FiDollarSign />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-white">₹{metrics.totalCollection.toLocaleString()}</div>
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mt-1">Total LTV</div>
+          </div>
+        </motion.div>
+        <motion.div whileHover={{ y: -2 }} className="bg-[#151f32] p-5 rounded-2xl border border-emerald-500/10 flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-yellow-500/20 to-orange-500/20 flex items-center justify-center text-yellow-400 text-xl">
+             <FiStar />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-white">{metrics.vipCount}</div>
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mt-1">VIP Accounts</div>
+          </div>
+        </motion.div>
+        <motion.div whileHover={{ y: -2 }} className="bg-[#151f32] p-5 rounded-2xl border border-emerald-500/10 flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500/20 to-red-500/20 flex items-center justify-center text-orange-400 text-xl">
+             <FiActivity />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-white">{metrics.riskCount}</div>
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mt-1">At Risk Users</div>
+          </div>
+        </motion.div>
+        <motion.div whileHover={{ y: -2 }} className="bg-[#151f32] p-5 rounded-2xl border border-emerald-500/10 flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-500/20 to-pink-500/20 flex items-center justify-center text-red-500 text-xl">
+             <FiAlertCircle />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-white">{metrics.recoveryCount}</div>
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mt-1">Jar Recovery</div>
+          </div>
+        </motion.div>
+      </div>
 
-        <MetricCard>
-          <IconWrapper $color="#f59e0b" $bg="#f59e0b20">
-            <FiClock />
-          </IconWrapper>
-          <MetricInfo>
-            <MetricValue>{metrics.avgDeliveryTime}m</MetricValue>
-            <MetricLabel>Avg Delivery Time</MetricLabel>
-          </MetricInfo>
-        </MetricCard>
+      <div className="flex gap-2 p-1.5 bg-[#151f32] rounded-xl overflow-x-auto custom-scrollbar border border-white/5">
+        {[
+          { id: 'VIP', label: `VIP (${segmentation.VIP.length})`, icon: <FiStar/>, activeColor: 'bg-emerald-500/20 text-emerald-400' },
+          { id: 'AT_RISK', label: `At Risk (${segmentation.AT_RISK.length})`, icon: <FiActivity/>, activeColor: 'bg-orange-500/20 text-orange-400' },
+          { id: 'JAR_RECOVERY', label: `Jar Recovery (${segmentation.JAR_RECOVERY.length})`, icon: <FiAlertCircle/>, activeColor: 'bg-red-500/20 text-red-400' },
+          { id: 'HEALTHY', label: `Healthy (${segmentation.HEALTHY.length})`, icon: <FiUsers/>, activeColor: 'bg-blue-500/20 text-blue-400' },
+          { id: 'INACTIVE', label: `Inactive (${segmentation.INACTIVE.length})`, icon: <FiClock/>, activeColor: 'bg-gray-500/20 text-gray-400' },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg whitespace-nowrap text-sm font-semibold transition-all ${activeTab === tab.id ? tab.activeColor : 'text-gray-400 hover:bg-white/5'}`}
+          >
+            {tab.icon} {tab.label}
+          </button>
+        ))}
+      </div>
 
-        <MetricCard>
-          <IconWrapper $color="#3b82f6" $bg="#3b82f620">
-            <FiBox />
-          </IconWrapper>
-          <MetricInfo>
-            <MetricValue>{metrics.totalJarsOut}</MetricValue>
-            <MetricLabel>Jars at User</MetricLabel>
-          </MetricInfo>
-        </MetricCard>
-
-        <MetricCard>
-          <IconWrapper $color="#8b5cf6" $bg="#8b5cf620">
-            <FiUsers />
-          </IconWrapper>
-          <MetricInfo>
-            <MetricValue>{metrics.activeCount}</MetricValue>
-            <MetricLabel>Active Users</MetricLabel>
-          </MetricInfo>
-        </MetricCard>
-      </MetricsGrid>
-
-      <Header>
-        <Title>Retention Radar</Title>
-        <Subtitle>Identify and recover users based on order history</Subtitle>
-      </Header>
-
-      <TabsContainer>
-        <Tab 
-          $active={activeTab === 'HEALTHY'} 
-          $color="#10b981"
-          onClick={() => setActiveTab('HEALTHY')}
-        >
-          Healthy ({segmentation.HEALTHY.length})
-        </Tab>
-        <Tab 
-          $active={activeTab === 'AT_RISK'} 
-          $color="#f59e0b"
-          onClick={() => setActiveTab('AT_RISK')}
-        >
-          At Risk ({segmentation.AT_RISK.length})
-        </Tab>
-        <Tab 
-          $active={activeTab === 'INACTIVE'} 
-          $color="#ef4444"
-          onClick={() => setActiveTab('INACTIVE')}
-        >
-          Inactive ({segmentation.INACTIVE.length})
-        </Tab>
-      </TabsContainer>
-
-      <ListCard>
-        {currentSegment.length === 0 ? (
-          <EmptyState>No users in this segment</EmptyState>
+      <div className="bg-[#151f32] border border-white/5 rounded-2xl overflow-hidden flex-1">
+        {loading ? (
+          <div className="p-12 text-center flex flex-col items-center">
+            <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" />
+            <div className="text-gray-400 text-sm">Loading CRM Data...</div>
+          </div>
+        ) : currentSegment.length === 0 ? (
+          <div className="p-16 text-center text-gray-500">
+            <FiUsers className="text-4xl mx-auto mb-4 opacity-50" />
+            <p>No users found in this segment</p>
+          </div>
         ) : (
-          currentSegment.map(user => {
-            const name = user.full_name || user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
-            return (
-              <UserRow key={user.id}>
-                <Avatar>{name.charAt(0).toUpperCase()}</Avatar>
-                <UserDetails>
-                  <UserName>{name}</UserName>
-                  <UserSub>Last order: {formatDateSafe(user.lastOrderDate)}</UserSub>
-                </UserDetails>
-                <ActionButtons>
-                  <ActionBtn $color="#8b5cf6" title="Send Notification">
-                    <FiBell />
-                  </ActionBtn>
-                  <ActionBtn $color="#10b981" onClick={() => handleWhatsApp(user)} title="WhatsApp">
-                    <FiMessageCircle />
-                  </ActionBtn>
-                  <ActionBtn $color="#3b82f6" onClick={() => handleCall(user)} title="Call">
-                    <FiPhone />
-                  </ActionBtn>
-                </ActionButtons>
-              </UserRow>
-            )
-          })
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead>
+                <tr className="bg-white/[0.02] text-gray-400 border-b border-white/5">
+                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">Customer</th>
+                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">Orders</th>
+                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">LTV</th>
+                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">Jars</th>
+                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">Last Order</th>
+                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentSegment.map((user) => {
+                  const name = user.full_name || user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
+                  return (
+                    <tr 
+                      key={user.id} 
+                      onClick={() => setSelectedUser(user)}
+                      className="border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer"
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold">
+                            {name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="font-semibold text-white">{name}</div>
+                            <div className="text-xs text-gray-500 font-mono mt-0.5">{user.customerId || user.id}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="bg-white/5 px-2.5 py-1 rounded-md text-gray-300 font-mono border border-white/5 text-xs">
+                          {user.__totalOrders || 0} dicts
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-medium text-emerald-400">₹{user.__ltv?.toLocaleString() || 0}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1">
+                          <FiBox className="text-gray-500"/> 
+                          <span className={`${(user.jars_occupied || 0) > 0 ? 'text-orange-400 font-bold' : 'text-gray-400'}`}>
+                            {user.jars_occupied || user.jarHold || 0}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-gray-400">
+                        {formatDateSafe(user.lastOrderDate)}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button 
+                            onClick={(e) => handleWhatsApp(e, user)} 
+                            className="bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366]/20 p-2.5 rounded-lg border border-[#25D366]/20 transition-colors"
+                          >
+                            <FiMessageCircle />
+                          </button>
+                          <button 
+                            onClick={(e) => handleCall(e, user)} 
+                            className="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 p-2.5 rounded-lg border border-blue-500/20 transition-colors"
+                          >
+                            <FiPhone />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-      </ListCard>
-    </PageContainer>
+      </div>
+
+      <UserInsightDrawer 
+        isOpen={!!selectedUser} 
+        onClose={() => setSelectedUser(null)} 
+        user={selectedUser} 
+      />
+
+    </div>
   );
 }

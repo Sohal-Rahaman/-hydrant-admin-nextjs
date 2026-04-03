@@ -10,109 +10,87 @@ import {
 
 const Overlay = styled(motion.div)`
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5); backdrop-filter: blur(8px);
+  background: rgba(0,0,0,0.8); backdrop-filter: blur(8px);
   z-index: 2000; display: flex; align-items: center; justify-content: center;
   padding: 16px;
 `;
 
 const ModalContent = styled(motion.div)`
-  background: var(--bg-primary, #ffffff);
-  width: 100%; max-width: 480px; max-height: 95vh; border-radius: 24px;
-  overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+  background: #181818;
+  width: 100%; max-width: 440px; border-radius: 28px;
+  overflow: hidden; border: 1px solid #2e2e2e;
+  box-shadow: 0 32px 64px rgba(0,0,0,0.5);
   display: flex; flex-direction: column;
-  position: relative;
 `;
 
 const Header = styled.div`
-  padding: 24px 20px 16px; display: flex; align-items: center; justify-content: space-between;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  padding: 24px 24px 12px; display: flex; align-items: center; justify-content: space-between;
 `;
 
-const Title = styled.h2`font-size: 20px; font-weight: 800; color: #1a1a18;`;
+const Title = styled.h2`font-size: 20px; font-weight: 800; color: #f0f0f0;`;
 
 const StepIndicator = styled.div`
-  display: flex; gap: 8px; justify-content: center; padding: 12px;
+  display: flex; gap: 6px; justify-content: center; padding: 12px;
 `;
 
 const Dot = styled.div<{ $active?: boolean; $done?: boolean }>`
-  width: 8px; height: 8px; border-radius: 4px;
-  background: ${props => props.$active ? '#10b981' : props.$done ? '#10b981' : '#e5e7eb'};
-  transition: all 0.3s ease;
-  ${props => props.$active && 'width: 24px;'}
+  height: 4px; border-radius: 2px;
+  background: ${props => props.$active ? '#10B981' : props.$done ? '#10B981' : '#2e2e2e'};
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  flex: 1; min-width: 20px;
 `;
 
-const Body = styled.div`padding: 24px 20px; flex: 1; overflow-y: auto;`;
+const Body = styled.div`padding: 24px; flex: 1;`;
 
 const Card = styled.div`
-  background: #fdfdfd; border-radius: 20px; padding: 20px; margin-bottom: 20px;
-  border: 1px solid #f1f5f9; box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+  background: #222; border-radius: 20px; padding: 20px; margin-bottom: 20px;
+  border: 1px solid #2e2e2e;
 `;
 
-const CardLabel = styled.div`font-size: 13px; color: #64748b; font-weight: 600; text-transform: uppercase; margin-bottom: 12px;`;
+const CardLabel = styled.div`font-size: 11px; color: #666; font-weight: 800; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.5px;`;
 
-const StepperRow = styled.div`display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;`;
+const StepperRow = styled.div`display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;`;
 
 const StepperTitle = styled.div`
-  div:first-child { font-weight: 700; color: #1e293b; font-size: 16px; }
-  div:last-child { font-size: 12px; color: #94a3b8; }
+  div:first-child { font-weight: 700; color: #f0f0f0; font-size: 16px; margin-bottom: 2px; }
+  div:last-child { font-size: 11px; color: #666; font-weight: 600; }
 `;
-
-const StepperActions = styled.div`display: flex; align-items: center; gap: 16px;`;
 
 const CircleBtn = styled.button`
-  width: 40px; height: 40px; border-radius: 20px; border: 1px solid #e2e8f0;
-  background: white; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.2s; color: #1e293b;
-  &:hover { background: #f8fafc; border-color: #cbd5e1; }
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
+  width: 44px; height: 44px; border-radius: 14px; border: 1px solid #333;
+  background: #181818; color: #f0f0f0; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.2s;
+  &:hover { background: #222; border-color: #444; }
+  &:disabled { opacity: 0.3; }
 `;
 
-const CountText = styled.span`font-size: 20px; font-weight: 800; min-width: 24px; text-align: center;`;
-
-const MetricGrid = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 12px;`;
-
-const MetricCard = styled.div<{ $color: string }>`
-  background: white; padding: 12px; border-radius: 16px; border: 1px solid #f1f5f9; text-align: center;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-  .val { font-size: 20px; font-weight: 800; color: ${props => props.$color}; }
-  .lbl { font-size: 10px; color: #94a3b8; font-weight: 700; margin-top: 2px; text-transform: uppercase; }
-`;
-
-// --- Numpad Styles ---
-const NumpadGrid = styled.div`display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 24px;`;
-const NumBtn = styled.button`
-  height: 64px; border-radius: 16px; border: 1px solid #f1f5f9; background: white;
-  font-size: 24px; font-weight: 700; color: #1e293b; cursor: pointer;
-  &:hover { background: #f8fafc; }
-  &:active { background: #f1f5f9; transform: scale(0.95); }
-`;
+const CountText = styled.span`font-size: 24px; font-weight: 900; color: #f0f0f0; min-width: 40px; text-align: center;`;
 
 const AmountDisplay = styled.div`
-  text-align: center; margin: 32px 0;
-  .symbol { font-size: 24px; color: #94a3b8; margin-right: 4px; }
-  .value { font-size: 56px; font-weight: 800; color: #1e293b; letter-spacing: -1px; }
+  text-align: center; margin: 24px 0;
+  .symbol { font-size: 24px; color: #666; margin-right: 4px; font-weight: 700; }
+  .value { font-size: 56px; font-weight: 900; color: #f0f0f0; letter-spacing: -2px; }
 `;
 
-const WarningBox = styled(motion.div)`
-  background: #fffbeb; border: 1px solid #fef3c7; padding: 16px; border-radius: 12px;
-  display: flex; gap: 12px; margin-bottom: 16px; color: #92400e;
+const NumpadGrid = styled.div`display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;`;
+
+const NumBtn = styled.button`
+  height: 56px; border-radius: 16px; border: 1px solid #2e2e2e; background: #222;
+  font-size: 20px; font-weight: 800; color: #f0f0f0; cursor: pointer;
+  &:active { background: #10B981; color: #000; transform: scale(0.95); }
 `;
 
 const Footer = styled.div`
-  padding: 16px 20px 24px; border-top: 1px solid #f1f5f9; display: flex; gap: 12px;
-  background: white; z-index: 10;
+  padding: 0 24px 24px; display: flex; gap: 12px;
 `;
 
-const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
-  flex: 1; padding: 14px; border-radius: 14px; font-size: 15px; font-weight: 700;
+const ActionButton = styled.button<{ $variant?: 'primary' }>`
+  flex: 1; padding: 16px; border-radius: 16px; font-size: 14px; font-weight: 800;
   display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; border: none;
-  background: ${props => props.$variant === 'primary' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : '#f8f9fa'};
-  color: ${props => props.$variant === 'primary' ? 'white' : '#475569'};
-  box-shadow: ${props => props.$variant === 'primary' ? '0 4px 12px rgba(16, 185, 129, 0.15)' : 'none'};
-  transition: all 0.2s ease;
-  &:hover { opacity: 0.9; transform: translateY(-1px); }
-  &:active { transform: translateY(0); }
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
+  background: ${props => props.$variant === 'primary' ? '#10B981' : '#2e2e2e'};
+  color: ${props => props.$variant === 'primary' ? '#000' : '#aaa'};
+  transition: all 0.2s;
+  &:active { transform: scale(0.98); }
 `;
 
 // --- Props ---
@@ -219,11 +197,11 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, onClose, onCompl
                       <div>Full Jars</div>
                       <div>Quantity to deliver</div>
                     </StepperTitle>
-                    <StepperActions>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <CircleBtn onClick={() => setDeliveredCount(c => Math.max(1, c - 1))}><FiMinus /></CircleBtn>
                       <CountText>{deliveredCount}</CountText>
                       <CircleBtn onClick={() => setDeliveredCount(c => c + 1)}><FiPlus /></CircleBtn>
-                    </StepperActions>
+                    </div>
                   </StepperRow>
 
                   <StepperRow>
@@ -231,24 +209,24 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, onClose, onCompl
                       <div>Empty Jars</div>
                       <div>Bottles collected</div>
                     </StepperTitle>
-                    <StepperActions>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <CircleBtn onClick={() => setCollectedCount(c => Math.max(0, c - 1))}><FiMinus /></CircleBtn>
                       <CountText>{collectedCount}</CountText>
                       <CircleBtn onClick={() => setCollectedCount(c => c + 1)}><FiPlus /></CircleBtn>
-                    </StepperActions>
+                    </div>
                   </StepperRow>
                 </Card>
 
-                <MetricGrid>
-                  <MetricCard $color="#10b981">
-                    <div className="val">{deliveredCount}</div>
-                    <div className="lbl">DELIVERING</div>
-                  </MetricCard>
-                  <MetricCard $color="#3b82f6">
-                    <div className="val">{netChange >= 0 ? `+${netChange}` : netChange}</div>
-                    <div className="lbl">NET CHANGE</div>
-                  </MetricCard>
-                </MetricGrid>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div style={{ background: '#222', padding: '16px', borderRadius: '16px', border: '1px solid #2e2e2e', textAlign: 'center' }}>
+                    <div style={{ fontSize: '24px', fontWeight: '900', color: '#10B981' }}>{deliveredCount}</div>
+                    <div style={{ fontSize: '10px', color: '#666', fontWeight: '700' }}>DELIVERING</div>
+                  </div>
+                  <div style={{ background: '#222', padding: '16px', borderRadius: '16px', border: '1px solid #2e2e2e', textAlign: 'center' }}>
+                    <div style={{ fontSize: '24px', fontWeight: '900', color: '#3B82F6' }}>{netChange >= 0 ? `+${netChange}` : netChange}</div>
+                    <div style={{ fontSize: '10px', color: '#666', fontWeight: '700' }}>NET CHANGE</div>
+                  </div>
+                </div>
               </motion.div>
             )}
 
@@ -261,13 +239,9 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, onClose, onCompl
                 </AmountDisplay>
 
                 {showPaymentWarning && (
-                  <WarningBox initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                    <FiInfo size={20} style={{ flexShrink: 0 }} />
-                    <div style={{ fontSize: '13px' }}>
-                      <strong>Amount Mismatch</strong><br />
-                      Due: ₹{totalAmount}. Entered: ₹{cashEntered}. Continue if this is intended.
-                    </div>
-                  </WarningBox>
+                  <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', padding: '12px', borderRadius: '12px', fontSize: '12px', color: '#F59E0B', marginBottom: '16px' }}>
+                    <strong>Mismatch:</strong> Due ₹{totalAmount}, Entered ₹{cashEntered}.
+                  </div>
                 )}
 
                 <NumpadGrid>
@@ -289,12 +263,12 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, onClose, onCompl
                       <strong style={{ color: '#10b981' }}>{deliveredCount} Full</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Collected</span>
-                      <strong style={{ color: '#f59e0b' }}>{collectedCount} Empty</strong>
+                      <span style={{ color: '#666' }}>Collected</span>
+                      <strong style={{ color: '#F59E0B' }}>{collectedCount} Empty</strong>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
-                      <span style={{ color: '#1e293b', fontWeight: '700' }}>Amount Collected</span>
-                      <strong style={{ color: '#10b981', fontSize: '18px' }}>₹{cashEntered || totalAmount}</strong>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #2e2e2e', paddingTop: '12px' }}>
+                      <span style={{ color: '#f0f0f0', fontWeight: '700' }}>Amount Collected</span>
+                      <strong style={{ color: '#10B981', fontSize: '18px' }}>₹{cashEntered || totalAmount}</strong>
                     </div>
                   </div>
                 </Card>
@@ -314,14 +288,14 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, onClose, onCompl
                 <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '32px' }}>Order #{order.id} has been marked as delivered.</p>
                 
                 <Card style={{ textAlign: 'left' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '8px' }}>Status written</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>status</span>
-                    <strong style={{ fontSize: '13px' }}>delivered</strong>
+                  <div style={{ fontSize: '12px', color: '#666', marginBottom: '12px' }}>Transaction Details</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '13px', color: '#aaa' }}>Status</span>
+                    <strong style={{ fontSize: '13px', color: '#10B981' }}>DELIVERED</strong>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '13px' }}>jars_occupied</span>
-                    <strong style={{ fontSize: '13px' }}>updated {netChange >= 0 ? `+${netChange}` : netChange}</strong>
+                    <span style={{ fontSize: '13px', color: '#aaa' }}>Inventory</span>
+                    <strong style={{ fontSize: '13px', color: '#3B82F6' }}>{netChange >= 0 ? `+${netChange}` : netChange} Jars</strong>
                   </div>
                 </Card>
               </motion.div>

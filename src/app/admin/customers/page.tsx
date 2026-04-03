@@ -13,7 +13,8 @@ import {
   FiMoreVertical,
   FiUserPlus,
   FiCheckCircle,
-  FiAlertCircle
+  FiAlertCircle,
+  FiTrash2
 } from 'react-icons/fi';
 import { 
   collection, 
@@ -25,7 +26,7 @@ import {
   increment,
   arrayUnion
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, deleteDocument } from '@/lib/firebase';
 
 interface UserData {
   id: string;
@@ -46,13 +47,13 @@ interface LeadData {
   createdAt: any;
 }
 
-const PageContainer = styled.div`
-  padding: 24px;
+const Container = styled.div`
   max-width: 1400px;
   margin: 0 auto;
+  padding: 24px;
 `;
 
-const Header = styled.div`
+const TopBar = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -62,7 +63,7 @@ const Header = styled.div`
 const Title = styled.h1`
   font-size: 24px;
   font-weight: 800;
-  color: #1a1a1a;
+  color: #f0f0f0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -71,29 +72,32 @@ const Title = styled.h1`
 const StatsGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
+  gap: 20px;
   margin-bottom: 32px;
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
 `;
 
-const StatCard = styled.div<{ variant?: 'primary' | 'success' | 'warning' }>`
-  background: white;
+const StatCard = styled.div`
+  background: #181818;
+  border: 1px solid #2e2e2e;
   border-radius: 20px;
   padding: 24px;
-  border: 1px solid #f3f4f6;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-
+  
   .label {
-    font-size: 12px;
-    font-weight: 700;
-    color: #9ca3af;
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     margin-bottom: 8px;
   }
   .value {
     font-size: 28px;
-    font-weight: 800;
-    color: #1f2937;
+    font-weight: 700;
+    color: #f0f0f0;
   }
 `;
 
@@ -101,33 +105,38 @@ const MainContent = styled.div`
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 24px;
+
+  @media (max-width: 1024px) {
+    grid-template-columns: 1fr;
+  }
 `;
 
 const ListCard = styled.div`
-  background: white;
+  background: #181818;
+  border: 1px solid #2e2e2e;
   border-radius: 20px;
-  border: 1px solid #f3f4f6;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
   overflow: hidden;
 `;
 
 const SearchBox = styled.div`
   padding: 20px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid #2e2e2e;
   position: relative;
 
   input {
     width: 100%;
-    padding: 12px 16px 12px 44px;
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
+    padding: 14px 16px 14px 48px;
+    background: #0f0f0f;
+    border: 1px solid #2e2e2e;
     border-radius: 12px;
-    outline: none;
+    color: #f0f0f0;
     font-size: 14px;
+    outline: none;
+    transition: all 0.2s;
     
     &:focus {
-      border-color: #4a00e0;
-      background: white;
+      border-color: #10B981;
+      box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
     }
   }
 
@@ -136,13 +145,13 @@ const SearchBox = styled.div`
     left: 36px;
     top: 50%;
     transform: translateY(-50%);
-    color: #9ca3af;
+    color: #666;
   }
 `;
 
 const UserItem = styled.div`
   padding: 16px 20px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid #2e2e2e;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -150,22 +159,113 @@ const UserItem = styled.div`
   transition: all 0.2s;
 
   &:hover {
-    background: #f9fafb;
+    background: #222;
   }
 
   &.active {
-    background: #f3e8ff;
-    border-left: 4px solid #4a00e0;
+    background: #222;
+    border-left: 4px solid #10B981;
   }
 `;
 
 const DetailCard = styled.div`
-  background: white;
-  border-radius: 20px;
-  border: 1px solid #f3f4f6;
-  padding: 24px;
+  background: #181818;
+  border: 1px solid #2e2e2e;
+  border-radius: 24px;
+  padding: 32px;
   position: sticky;
   top: 24px;
+`;
+
+const Avatar = styled.div<{ size?: string; $bg?: string }>`
+  width: ${props => props.size || '48px'};
+  height: ${props => props.size || '48px'};
+  border-radius: ${props => props.size ? '16px' : '12px'};
+  background: ${props => props.$bg || '#10B981'};
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: ${props => props.size ? '24px' : '18px'};
+  box-shadow: 0 8px 16px rgba(16, 185, 129, 0.2);
+`;
+
+const WalletPill = styled.div`
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: #10B981;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-family: 'DM Mono', monospace;
+  font-weight: 700;
+  font-size: 13px;
+`;
+
+const InfoRow = styled.div`
+  padding: 16px;
+  background: #222;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+
+  svg {
+    color: #10B981;
+  }
+
+  .label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .value {
+    font-size: 14px;
+    color: #f0f0f0;
+    font-weight: 500;
+  }
+`;
+
+const ActionButton = styled.button<{ variant?: 'primary' | 'danger' | 'ghost' }>`
+  width: 100%;
+  padding: 14px;
+  border-radius: 14px;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+
+  ${props => {
+    switch (props.variant) {
+      case 'primary': return `background: #10B981; color: white; &:hover { background: #059669; }`;
+      case 'danger': return `background: rgba(239, 68, 68, 0.1); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.2); &:hover { background: #EF4444; color: white; }`;
+      default: return `background: transparent; color: #666; border: 1px solid #2e2e2e; &:hover { background: #222; }`;
+    }
+  }}
+`;
+
+const InputField = styled.input`
+  width: 100%;
+  padding: 14px;
+  background: #222;
+  border: 1px solid #2e2e2e;
+  border-radius: 12px;
+  color: #f0f0f0;
+  font-size: 14px;
+  outline: none;
+  
+  &:focus {
+    border-color: #10B981;
+  }
 `;
 
 export default function CustomersPage() {
@@ -178,6 +278,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setLoading(true);
+    // Fixed: Ensure users are sorted by newest first
     const qUsers = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
     const qLeads = query(collection(db, 'leads'));
 
@@ -209,149 +310,183 @@ export default function CustomersPage() {
     const userRef = doc(db, 'users', selectedUser.id);
     const change = type === 'add' ? amount : -amount;
 
-    await updateDoc(userRef, {
-      walletBalance: increment(change),
-      walletHistory: arrayUnion({
-        type: 'admin_adjustment',
-        amount: change,
-        timestamp: new Date(),
-        reason: 'Manual adjustment by Admin'
-      })
-    });
+    try {
+      await updateDoc(userRef, {
+        walletBalance: increment(change),
+        walletHistory: arrayUnion({
+          type: 'admin_adjustment',
+          amount: change,
+          timestamp: new Date(),
+          reason: 'Manual adjustment by Admin'
+        })
+      });
+      setAdjustmentAmount('');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to adjust wallet');
+    }
+  };
 
-    setAdjustmentAmount('');
-    alert(`Wallet adjusted successfully!`);
+  const handleDeleteUser = async () => {
+    if (!selectedUser) return;
+    
+    const confirm1 = window.confirm(`DANGER: Are you sure you want to PERMANENTLY delete ${selectedUser.name || 'this user'}? This cannot be undone.`);
+    if (!confirm1) return;
+    
+    const confirm2 = window.prompt(`Type DELETE to confirm permanent removal of user ${selectedUser.id}:`);
+    if (confirm2 !== 'DELETE') {
+      alert('Delete cancelled. Confirmation text did not match.');
+      return;
+    }
+
+    try {
+      await deleteDocument('users', selectedUser.id);
+      setSelectedUser(null);
+      alert('User deleted permanently.');
+    } catch (err) {
+      console.error(err);
+      alert('Error deleting user. Check permissions.');
+    }
   };
 
   const conversionRate = leads.length > 0 
     ? ((leads.filter(l => l.converted).length / leads.length) * 100).toFixed(1)
     : 0;
 
-  if (loading) return <div className="p-10 text-center font-bold">Loading CRM...</div>;
+  if (loading) return (
+    <div style={{ background: '#0f0f0f', minHeight: '100vh', padding: '40px', color: '#666', textAlign: 'center' }}>
+      Loading Emerald CRM...
+    </div>
+  );
 
   return (
-    <PageContainer>
-      <Header>
-        <Title><FiUsers /> Customer Management</Title>
-      </Header>
+    <div style={{ background: '#0f0f0f', minHeight: '100vh', color: '#f0f0f0' }}>
+      <Container>
+        <TopBar>
+          <Title><FiUsers /> CRM Control Center</Title>
+        </TopBar>
 
-      <StatsGrid>
-        <StatCard>
-          <div className="label">Total Registered</div>
-          <div className="value">{users.length}</div>
-        </StatCard>
-        <StatCard>
-          <div className="label">Total Leads</div>
-          <div className="value">{leads.length}</div>
-        </StatCard>
-        <StatCard>
-          <div className="label">Conversion Rate</div>
-          <div className="value">{conversionRate}%</div>
-        </StatCard>
-      </StatsGrid>
+        <StatsGrid>
+          <StatCard>
+            <div className="label">Total Registered</div>
+            <div className="value">{users.length}</div>
+          </StatCard>
+          <StatCard>
+            <div className="label">Total Conversion</div>
+            <div className="value">{conversionRate}%</div>
+          </StatCard>
+          <StatCard>
+            <div className="label">Active Leads</div>
+            <div className="value">{leads.length}</div>
+          </StatCard>
+        </StatsGrid>
 
-      <MainContent>
-        <ListCard>
-          <SearchBox>
-            <FiSearch />
-            <input 
-              placeholder="Search by name, phone or ID..." 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </SearchBox>
-          <div className="overflow-y-auto max-h-[600px]">
-            {filteredUsers.map(user => (
-              <UserItem 
-                key={user.id} 
-                className={selectedUser?.id === user.id ? 'active' : ''}
-                onClick={() => setSelectedUser(user)}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
-                    {user.name?.[0]?.toUpperCase() || 'U'}
+        <MainContent>
+          <ListCard>
+            <SearchBox>
+              <FiSearch />
+              <input 
+                placeholder="Search name, phone or ID..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </SearchBox>
+            <div style={{ overflowY: 'auto', maxHeight: '700px' }}>
+              {filteredUsers.map(user => (
+                <UserItem 
+                  key={user.id} 
+                  className={selectedUser?.id === user.id ? 'active' : ''}
+                  onClick={() => setSelectedUser(user)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <Avatar $bg={user.isPremium ? '#F59E0B' : '#10B981'}>
+                      {user.name?.[0]?.toUpperCase() || 'U'}
+                    </Avatar>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '15px' }}>{user.name || 'Guest User'}</div>
+                      <div style={{ fontSize: '12px', color: '#666' }}>{user.phone || user.id.slice(0, 12)}</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="font-bold text-gray-800">{user.name || 'Anonymous'}</div>
-                    <div className="text-xs text-gray-500">{user.phone}</div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="font-mono font-bold text-indigo-600">₹{user.walletBalance || 0}</div>
-                  <div className={user.isPremium ? "text-[10px] font-bold text-amber-500 uppercase" : "hidden"}>Premium</div>
-                </div>
-              </UserItem>
-            ))}
-          </div>
-        </ListCard>
-
-        <div>
-          {selectedUser ? (
-            <DetailCard>
-              <div className="flex justify-between items-start mb-6">
-                <div className="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-3xl font-extrabold shadow-lg shadow-indigo-100">
-                  {selectedUser.name?.[0]?.toUpperCase() || 'U'}
-                </div>
-                <div className="p-2 hover:bg-gray-100 rounded-xl cursor-not-allowed text-gray-400">
-                  <FiMoreVertical />
-                </div>
-              </div>
-
-              <h2 className="text-xl font-extrabold text-gray-800 mb-1">{selectedUser.name || 'User Profile'}</h2>
-              <p className="text-sm text-gray-500 mb-6">User ID: <span className="font-mono">#{selectedUser.id.slice(0,10)}</span></p>
-
-              <div className="space-y-4 mb-8">
-                <div className="p-4 bg-gray-50 rounded-2xl flex items-center gap-4">
-                  <FiCreditCard className="text-indigo-600" />
-                  <div>
-                    <div className="text-xs font-bold text-gray-400 uppercase">Current Balance</div>
-                    <div className="text-lg font-extrabold text-gray-800">₹{selectedUser.walletBalance || 0}</div>
-                  </div>
-                </div>
-                <div className="p-4 bg-gray-50 rounded-2xl flex items-center gap-4">
-                  <FiMapPin className="text-indigo-600" />
-                  <div className="flex-1">
-                    <div className="text-xs font-bold text-gray-400 uppercase">Primary Address</div>
-                    <div className="text-xs font-medium text-gray-600 truncate">{selectedUser.deliveryAddresses?.[0]?.address || 'No address set'}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t pt-6">
-                <h4 className="text-sm font-bold text-gray-800 mb-4">Wallet Adjustment</h4>
-                <div className="flex gap-2 mb-4">
-                  <input 
-                    type="number" 
-                    placeholder="Amount..." 
-                    className="flex-1 px-4 py-2 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-100"
-                    value={adjustmentAmount}
-                    onChange={(e) => setAdjustmentAmount(e.target.value)}
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => handleAdjustWallet('add')}
-                    className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
-                  >
-                    <FiArrowUpRight /> Add
-                  </button>
-                  <button 
-                    onClick={() => handleAdjustWallet('remove')}
-                    className="flex-1 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-gray-50 transition-all"
-                  >
-                    <FiArrowDownLeft /> Remove
-                  </button>
-                </div>
-              </div>
-            </DetailCard>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center border-2 border-dashed border-gray-100 rounded-3xl text-gray-400 p-8 text-center">
-              <FiUsers size={48} className="mb-4 opacity-20" />
-              <p className="font-medium">Select a customer from the list to view and manage their profile details.</p>
+                  <WalletPill>₹{user.walletBalance || 0}</WalletPill>
+                </UserItem>
+              ))}
             </div>
-          )}
-        </div>
-      </MainContent>
-    </PageContainer>
+          </ListCard>
+
+          <div>
+            {selectedUser ? (
+              <DetailCard>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '32px' }}>
+                  <Avatar size="64px" $bg={selectedUser.isPremium ? '#F59E0B' : '#10B981'}>
+                    {selectedUser.name?.[0]?.toUpperCase() || 'U'}
+                  </Avatar>
+                  <div style={{ color: '#666' }}>
+                    <FiMoreVertical size={24} />
+                  </div>
+                </div>
+
+                <h2 style={{ fontSize: '24px', fontWeight: 800, marginBottom: '4px' }}>{selectedUser.name || 'Anonymous User'}</h2>
+                <p style={{ fontSize: '13px', color: '#666', marginBottom: '32px', fontFamily: 'DM Mono' }}>#{selectedUser.id}</p>
+
+                <InfoRow>
+                  <FiCreditCard size={20} />
+                  <div>
+                    <div className="label">Wallet Standing</div>
+                    <div className="value">₹{selectedUser.walletBalance || 0}</div>
+                  </div>
+                </InfoRow>
+
+                <InfoRow>
+                  <FiMapPin size={20} />
+                  <div style={{ flex: 1 }}>
+                    <div className="label">Primary HQ</div>
+                    <div className="value" style={{ fontSize: '12px' }}>{selectedUser.deliveryAddresses?.[0]?.address || 'No location saved'}</div>
+                  </div>
+                </InfoRow>
+
+                <div style={{ marginTop: '32px', borderTop: '1px solid #2e2e2e', paddingTop: '32px' }}>
+                  <div style={{ marginBottom: '20px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#666', textTransform: 'uppercase', marginBottom: '12px' }}>Manual Adjustment</div>
+                    <InputField 
+                      type="number" 
+                      placeholder="Enter amount..." 
+                      value={adjustmentAmount}
+                      onChange={(e) => setAdjustmentAmount(e.target.value)}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+                    <ActionButton variant="primary" onClick={() => handleAdjustWallet('add')}>
+                      <FiArrowUpRight /> Deposit
+                    </ActionButton>
+                    <ActionButton variant="ghost" onClick={() => handleAdjustWallet('remove')}>
+                      <FiArrowDownLeft /> Deduct
+                    </ActionButton>
+                  </div>
+                  <ActionButton variant="danger" onClick={handleDeleteUser} style={{ marginTop: '12px' }}>
+                    <FiAlertCircle /> Permanent Delete
+                  </ActionButton>
+                </div>
+              </DetailCard>
+            ) : (
+              <div style={{ 
+                height: '500px', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                border: '2px dashed #2e2e2e', 
+                borderRadius: '32px',
+                color: '#666',
+                padding: '40px',
+                textAlign: 'center'
+              }}>
+                <FiUsers size={48} style={{ marginBottom: '24px', opacity: 0.2 }} />
+                <p style={{ fontWeight: 600 }}>Select a customer to view operational details and manage assets.</p>
+              </div>
+            )}
+          </div>
+        </MainContent>
+      </Container>
+    </div>
   );
 }

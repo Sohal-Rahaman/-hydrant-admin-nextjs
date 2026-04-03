@@ -1,7 +1,16 @@
 {
-  "buildCommand": "npm run build",
-  "devCommand": "npm run dev",
-  "installCommand": "npm install",
-  "framework": "nextjs",
-  "outputDirectory": ".next"
+  "crons": [
+    {
+      "path": "/api/cron/lifecycle-eval",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/billing-trigger",
+      "schedule": "0 0 1 * *"
+    },
+    {
+      "path": "/api/cron/sync-zoho-sheet",
+      "schedule": "0 2 * * *"
+    }
+  ]
 }

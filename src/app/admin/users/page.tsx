@@ -5,7 +5,7 @@ import styled from 'styled-components';
 import {
   subscribeToCollection, updateDocument, addDocument, deleteDocument
 } from '@/lib/firebase';
-import { FiSearch, FiGift, FiCopy, FiPhoneCall, FiBell, FiSlash, FiChevronDown, FiChevronUp, FiCheck, FiPackage, FiMessageCircle, FiPlus, FiTrash2, FiEdit2 } from 'react-icons/fi';
+import { FiSearch, FiGift, FiCopy, FiPhoneCall, FiBell, FiSlash, FiChevronDown, FiChevronUp, FiCheck, FiPackage, FiMessageCircle, FiPlus, FiMinus, FiCheckCircle, FiXCircle, FiTrash2, FiEdit2, FiGrid } from 'react-icons/fi';
 import { where, serverTimestamp, writeBatch, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
@@ -53,7 +53,9 @@ interface User {
   full_name?: string; displayName?: string;
   firstName?: string; lastName?: string;
   email?: string; phoneNumber?: string; phone?: string; alt_phone?: string;
-  wallet_balance?: number; jars_occupied?: number;
+  wallet_balance?: number; jars_occupied?: number; jarHold?: number;
+  depositPaid?: boolean; referralCount?: number; bonusEarned?: number;
+  lastOrderDate?: { toDate(): Date } | Date | string;
   createdAt?: { toDate(): Date } | Date | string;
   role?: string; isActive?: boolean; status?: string;
   addresses?: Address[]; orders?: Order[];
@@ -191,10 +193,28 @@ const Metrics = styled.div<{ $cols?: number }>`
 `;
 const Metric = styled.div`
   background: var(--color-background-secondary);
-  border-radius: 8px; padding: 10px 12px;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 0.5px solid var(--color-border-tertiary);
 `;
-const ML = styled.div`font-size: 10px; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px;`;
-const MV = styled.div<{ $color?: string }>`font-size: 18px; font-weight: 500; color: ${p => p.$color ?? 'var(--color-text-primary)'};`;
+
+const ML = styled.div<{ $color?: string }>`
+  font-size: 9px;
+  font-weight: 600;
+  color: ${p => p.$color || 'var(--color-text-tertiary)'};
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+`;
+
+const MV = styled.div<{ $color?: string }>`
+  font-size: 16px;
+  font-weight: 700;
+  color: ${p => p.$color || 'var(--color-text-primary)'};
+`;
+
 const MSub = styled.div`font-size: 10px; color: var(--color-text-tertiary); margin-top: 1px;`;
 const SectionTitle = styled.div`
   font-size: 11px; font-weight: 500; color: var(--color-text-secondary);
@@ -252,6 +272,19 @@ const AddrCard = styled.div<{ $default?: boolean }>`
 `;
 const RevGrid = styled.div`display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px;`;
 const RevCard = styled.div`background: var(--color-background-secondary); border-radius: 8px; padding: 12px;`;
+
+const MetricCard = styled.div`
+  background: var(--color-background-primary);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  flex: 1;
+`;
+
 const WalletAdj = styled.div`background: var(--color-background-secondary); border-radius: 8px; padding: 12px; margin-bottom: 10px;`;
 const AdjRow = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; font-size: 11px; color: var(--color-text-secondary);`;
 const AdjInput = styled.input`padding: 6px 8px; font-size: 12px; border: 0.5px solid var(--color-border-secondary); border-radius: 8px; background: var(--color-background-primary); color: var(--color-text-primary);`;
@@ -284,6 +317,19 @@ const BarLabel = styled.div`display: flex; justify-content: space-between; font-
 const BarTrack = styled.div`height: 8px; background: var(--color-background-secondary); border-radius: 4px; overflow: hidden;`;
 const BarFill = styled.div<{ $w: number; $color: string }>`height: 100%; width: ${p => p.$w}%; background: ${p => p.$color}; border-radius: 4px; transition: width .4s;`;
 const MonoBadge = styled.span`font-family: monospace; font-size: 11px;`;
+const ScrollToTop = styled.button<{ $show: boolean }>`
+  position: fixed; bottom: 24px; right: 80px; z-index: 1500;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--color-background-info); color: var(--color-text-info);
+  border: 1px solid var(--color-border-info); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  transition: all 0.3s;
+  opacity: ${p => p.$show ? 1 : 0};
+  pointer-events: ${p => p.$show ? 'auto' : 'none'};
+  &:hover { transform: translateY(-2px); background: #d0e5f9; }
+`;
+
 const ModalBackdrop = styled.div`
   position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.4);
   z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px;
@@ -321,6 +367,89 @@ const Bar = ({ label, val, total, color, suffix = '' }: { label: string; val: nu
   </BarWrap>
 );
 
+const FleetContainer = styled.div`
+  margin-top: 10px;
+  background: var(--color-background-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+`;
+
+const FleetHeader = styled.div`
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-background-primary);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+`;
+
+const FleetScroll = styled.div`
+  overflow: auto;
+  flex: 1;
+  padding: 0;
+  
+  /* Custom Emerald Scrollbar */
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.05);
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #10b981; /* Emerald-500 */
+    border-radius: 10px;
+    border: 2px solid var(--color-background-secondary);
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: #059669; /* Emerald-600 */
+  }
+`;
+
+const FilterChip = styled.button<{ $active: boolean }>`
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1.5px solid ${p => p.$active ? '#10b981' : 'var(--color-border-secondary)'};
+  background: ${p => p.$active ? 'rgba(16, 185, 129, 0.1)' : 'transparent'};
+  color: ${p => p.$active ? '#10b981' : 'var(--color-text-secondary)'};
+  
+  &:hover {
+    border-color: #10b981;
+    color: #10b981;
+  }
+`;
+
+const JarControl = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-background-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2px 6px;
+`;
+
+const JarBtn = styled.button`
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-info);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  &:hover { background: var(--color-background-secondary); }
+`;
+
 // ─── Main Component ───────────────────────────────────────
 type TabId = 'overview' | 'profile' | 'orders' | 'transactions' | 'revenue' | 'wallet';
 
@@ -335,6 +464,10 @@ export default function UsersPage() {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [toast, setToast] = useState('');
   const [toastShow, setToastShow] = useState(false);
+  const [fleetMode, setFleetMode] = useState(false);
+  const [showToTop, setShowToTop] = useState(false);
+  const [inactiveFilter, setInactiveFilter] = useState<'all' | '10d' | '1mo' | '5mo'>('all');
+
 
   // order tab filters
   const [fStatus, setFStatus] = useState('');
@@ -364,6 +497,16 @@ export default function UsersPage() {
   const [isAddrModalOpen, setIsAddrModalOpen] = useState(false);
   const [addrForm, setAddrForm] = useState<Partial<Address>>({});
 
+  const updateUserField = async (userId: string, field: string, value: any) => {
+    try {
+      await updateDocument('users', userId, { [field]: value });
+      showToast(`Updated ${field.replace('_', ' ')}`);
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to update');
+    }
+  };
+
   useEffect(() => {
     if (editingAddress) {
       setAddrForm(editingAddress);
@@ -382,13 +525,16 @@ export default function UsersPage() {
   const customerIdParam = searchParams.get('customerId');
   const router = useRouter();
 
-  // Handle deep linking from Orders page
+  // Handle deep linking from Orders page or Fleet link
   useEffect(() => {
+    const mode = searchParams.get('mode');
+    if (mode === 'fleet') setFleetMode(true);
+    
     if (customerIdParam && users.length > 0) {
       const user = users.find(u => u.customerId === customerIdParam || u.id === customerIdParam);
       if (user) setSelected(user);
     }
-  }, [customerIdParam, users]);
+  }, [customerIdParam, searchParams, users]);
 
   // Global subscriptions
   useEffect(() => {
@@ -436,6 +582,21 @@ export default function UsersPage() {
     return () => { unsub1(); unsub2(); unsub3(); };
   }, []);
 
+  // Update showToTop on scroll (for Fleet Mode)
+  useEffect(() => {
+    const mainEl = document.querySelector('#admin-main-panel');
+    if (!mainEl) return;
+    const handleScroll = () => setShowToTop(mainEl.scrollTop > 400);
+    mainEl.addEventListener('scroll', handleScroll);
+    return () => mainEl.removeEventListener('scroll', handleScroll);
+  }, [fleetMode]);
+
+  const scrollToTop = () => {
+    const mainEl = document.querySelector('#admin-main-panel');
+    if (mainEl) mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+
   // Per-user order/txn live subscription
   useEffect(() => {
     if (!selected) return;
@@ -466,26 +627,86 @@ export default function UsersPage() {
   const filteredUsers = users
     .filter(u => {
       const q = search.toLowerCase();
-      return !q ||
+      const matchesSearch = !q ||
         dName(u).toLowerCase().includes(q) ||
         (u.customerId || '').toLowerCase().includes(q) ||
         (u.email || '').toLowerCase().includes(q) ||
         (u.phoneNumber || '').toLowerCase().includes(q) ||
         (u.phone || '').toLowerCase().includes(q);
+
+      if (!matchesSearch) return false;
+
+      // Inactive filter logic
+      if (inactiveFilter !== 'all') {
+        const uOrds = orders.filter(o => o.userId === u.id);
+        if (uOrds.length === 0) return true; // Never ordered = inactive
+
+        const lastO = uOrds.sort((a,b) => {
+          const getTs = (o: any) => {
+            const t = o.createdAt;
+            if (!t) return 0;
+            if (typeof t.toMillis === 'function') return t.toMillis();
+            return new Date(t).getTime();
+          };
+          return getTs(b) - getTs(a);
+        })[0];
+
+        const lastTs = lastO.createdAt ? (typeof (lastO.createdAt as any).toMillis === 'function' ? (lastO.createdAt as any).toMillis() : new Date(lastO.createdAt as any).getTime()) : 0;
+        const diffMs = Date.now() - lastTs;
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+        if (inactiveFilter === '10d') return diffDays >= 10;
+        if (inactiveFilter === '1mo') return diffDays >= 30;
+        if (inactiveFilter === '5mo') return diffDays >= 150;
+      }
+
+      return true;
     })
     .sort((a, b) => {
-      // Newest account first
-      const getTs = (u: User) => {
+      // Specific sort: if inactivity filter is on, sort by inactivity duration (Low to High)
+      if (inactiveFilter !== 'all') {
+        const getInactivityMs = (u: User) => {
+          const uOrds = orders.filter(o => o.userId === u.id);
+          if (uOrds.length === 0) return 9999999999999; // Effectively infinity (never ordered)
+          const lastO = uOrds.reduce((latest: any, o: any) => {
+            const getTs = (ord: any) => {
+              const t = ord.createdAt;
+              if (!t) return 0;
+              if (typeof t.toMillis === 'function') return t.toMillis();
+              return new Date(t).getTime();
+            };
+            return getTs(o) > getTs(latest) ? o : latest;
+          }, uOrds[0]);
+          const lTs = lastO.createdAt ? (typeof (lastO.createdAt as any).toMillis === 'function' ? (lastO.createdAt as any).toMillis() : new Date(lastO.createdAt as any).getTime()) : 0;
+          return Date.now() - lTs;
+        };
+        const diffA = getInactivityMs(a);
+        const diffB = getInactivityMs(b);
+        if (diffA !== diffB) return diffA - diffB;
+      }
+
+      // Default sort (when no inactivity filter): Newest Customer ID first
+      const getIDNum = (id?: string) => {
+        if (!id) return 0;
+        const m = id.match(/\d+/);
+        return m ? parseInt(m[0]) : 0;
+      };
+      const nA = getIDNum(a.customerId);
+      const nB = getIDNum(b.customerId);
+      if (nA !== nB) return nB - nA;
+
+      // Secondary default: Newest account first
+      const getAccTs = (u: User) => {
         const c = u.createdAt as any;
         if (!c) return 0;
         if (typeof c.toMillis === 'function') return c.toMillis();
         if (typeof c.toDate === 'function') return c.toDate().getTime();
         if (c instanceof Date) return c.getTime();
-        if (typeof c === 'string' || typeof c === 'number') return new Date(c).getTime();
-        return 0;
+        return new Date(c).getTime() || 0;
       };
-      return getTs(b) - getTs(a);
+      return getAccTs(b) - getAccTs(a);
     });
+
 
   // ── Overview helpers ──
   const oDelivered = (ords: Order[]) => ords.filter(o => o.status === 'delivered' || o.status === 'completed');
@@ -671,6 +892,182 @@ export default function UsersPage() {
   }
 
   const selPalette = selected ? palette(selected.customerId || selected.id) : AVATAR_PALETTES[0];
+
+  const renderFleetView = () => {
+    // 1. Calculate stats across all users
+    const fleetStats = users.reduce((acc, u) => {
+      acc.totalJars += (u.jars_occupied || 0);
+      acc.totalWallet += (u.wallet_balance || 0);
+      
+      const uOrds = orders.filter(o => o.userId === u.id);
+      if (uOrds.length > 0) {
+        const lastO = uOrds.sort((a,b) => {
+          const tA = a.createdAt ? (typeof (a.createdAt as any).toMillis === 'function' ? (a.createdAt as any).toMillis() : new Date(a.createdAt as any).getTime()) : 0;
+          const tB = b.createdAt ? (typeof (b.createdAt as any).toMillis === 'function' ? (b.createdAt as any).toMillis() : new Date(b.createdAt as any).getTime()) : 0;
+          return tB - tA;
+        })[0];
+        const lastTs = lastO.createdAt ? (typeof (lastO.createdAt as any).toMillis === 'function' ? (lastO.createdAt as any).toMillis() : new Date(lastO.createdAt as any).getTime()) : 0;
+        if ((Date.now() - lastTs) > (10 * 24 * 60 * 60 * 1000)) acc.inactive10d++;
+      } else {
+        acc.inactive10d++;
+      }
+      return acc;
+    }, { totalJars: 0, totalWallet: 0, inactive10d: 0 });
+
+    return (
+      <FleetContainer>
+        <FleetHeader>
+          <div style={{ display: 'flex', gap: 24, flex: 1 }}>
+            <MetricCard>
+              <ML $color="#71717a">FLEET CUSTOMERS</ML>
+              <MV style={{ color: '#10b981' }}>{users.length}</MV>
+            </MetricCard>
+            <MetricCard>
+              <ML $color="#71717a">TOTAL JARS OUT</ML>
+              <MV style={{ color: '#3b82f6' }}>{fleetStats.totalJars}</MV>
+            </MetricCard>
+            <MetricCard>
+              <ML $color="#71717a">WALLET FLOAT</ML>
+              <MV style={{ color: '#059669' }}>₹{fleetStats.totalWallet.toLocaleString()}</MV>
+            </MetricCard>
+            <MetricCard>
+              <ML $color="#71717a">INACTIVE (10D+)</ML>
+              <MV style={{ color: 'var(--color-text-danger)' }}>{fleetStats.inactive10d}</MV>
+            </MetricCard>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '4px 12px', borderRadius: 100, border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filters:</span>
+            {(['all', '10d', '1mo', '5mo'] as const).map(f => (
+              <FilterChip 
+                key={f} 
+                $active={inactiveFilter === f} 
+                onClick={() => setInactiveFilter(f)}
+                style={{ fontSize: 10, padding: '4px 12px' }}
+              >
+                {f === 'all' ? 'All' : f === '10d' ? '10d+' : f === '1mo' ? '1mo+' : '5mo+'}
+              </FilterChip>
+            ))}
+          </div>
+        </FleetHeader>
+
+        <FleetScroll style={{ height: 'calc(100vh - 220px)', overflow: 'auto' }}>
+          <Table style={{ position: 'relative', borderCollapse: 'separate', borderSpacing: 0 }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 100, background: 'var(--color-background-primary)', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>
+              <tr>
+                <Th style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border-primary)' }}>Customer ID</Th>
+                <Th style={{ borderBottom: '1px solid var(--color-border-primary)' }}>Customer Details</Th>
+                <Th style={{ borderBottom: '1px solid var(--color-border-primary)' }}>Last Seen / Status</Th>
+                <Th style={{ borderBottom: '1px solid var(--color-border-primary)' }}>Hold Jars</Th>
+                <Th style={{ borderBottom: '1px solid var(--color-border-primary)' }}>Wallet</Th>
+                <Th style={{ borderBottom: '1px solid var(--color-border-primary)' }}>Deposit</Th>
+                <Th style={{ borderBottom: '1px solid var(--color-border-primary)' }}>Referrals</Th>
+                <Th style={{ textAlign: 'right', paddingRight: 20, borderBottom: '1px solid var(--color-border-primary)' }}>Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredUsers.length === 0 ? (
+                <tr>
+                  <Td colSpan={8} style={{ textAlign: 'center', padding: '100px 0', opacity: 0.5 }}>
+                    <FiSearch size={40} style={{ marginBottom: 12, opacity: 0.2 }} />
+                    <p>No customers matching the current filter</p>
+                  </Td>
+                </tr>
+              ) : filteredUsers.map(u => {
+                const uOrds = orders.filter(o => o.userId === u.id);
+                const lastO = uOrds.length > 0 ? [...uOrds].sort((a,b) => {
+                  const tA = a.createdAt ? (typeof (a.createdAt as any).toMillis === 'function' ? (a.createdAt as any).toMillis() : new Date(a.createdAt as any).getTime()) : 0;
+                  const tB = b.createdAt ? (typeof (b.createdAt as any).toMillis === 'function' ? (b.createdAt as any).toMillis() : new Date(b.createdAt as any).getTime()) : 0;
+                  return tB - tA;
+                })[0] : null;
+
+                const lastTs = lastO?.createdAt ? (typeof (lastO.createdAt as any).toMillis === 'function' ? (lastO.createdAt as any).toMillis() : new Date(lastO.createdAt as any).getTime()) : 0;
+                const diffDays = lastTs ? Math.floor((Date.now() - lastTs) / (1000 * 60 * 60 * 24)) : 999;
+                
+                return (
+                  <tr key={u.id} style={{ transition: 'all 0.2s' }}>
+                    <Td style={{ paddingLeft: 20 }}>
+                      <MonoBadge style={{ color: '#10b981', fontWeight: 700, fontSize: 11, background: 'rgba(16,185,129,0.08)', padding: '4px 8px', borderRadius: '6px' }}>
+                        {u.customerId || u.id.slice(-6).toUpperCase()}
+                      </MonoBadge>
+                    </Td>
+                    <Td>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: 13 }}>{dName(u)}</span>
+                        <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)', letterSpacing: '0.02em' }}>{u.phoneNumber || u.phone || 'No phone'}</span>
+                      </div>
+                    </Td>
+                    <Td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div style={{ 
+                          fontSize: 11, 
+                          color: diffDays > 30 ? '#f87171' : diffDays > 10 ? '#fbbf24' : '#4ade80',
+                          fontWeight: 700 
+                        }}>
+                          {diffDays === 999 ? 'No Activity' : `${diffDays} days ago`}
+                        </div>
+                        <div style={{ fontSize: 9, color: 'var(--color-text-tertiary)' }}>
+                          {lastO ? fmt(lastO.createdAt) : 'Fresh Client'}
+                        </div>
+                      </div>
+                    </Td>
+                    <Td>
+                      <JarControl>
+                        <JarBtn onClick={(e) => { e.stopPropagation(); updateUserField(u.id, 'jars_occupied', Math.max(0, (u.jars_occupied || 0) - 1)); }} title="Remive Jar">
+                          <FiMinus size={12} />
+                        </JarBtn>
+                        <span style={{ minWidth: '18px', textAlign: 'center', fontWeight: 700, fontSize: 14 }}>{u.jars_occupied || 0}</span>
+                        <JarBtn onClick={(e) => { e.stopPropagation(); updateUserField(u.id, 'jars_occupied', (u.jars_occupied || 0) + 1); }} title="Add Jar">
+                          <FiPlus size={12} />
+                        </JarBtn>
+                      </JarControl>
+                    </Td>
+                    <Td>
+                      <div style={{ color: (u.wallet_balance || 0) < 0 ? '#f87171' : '#10b981', fontWeight: 700, fontSize: 13 }}>
+                        ₹{(u.wallet_balance || 0).toLocaleString()}
+                      </div>
+                    </Td>
+                    <Td>
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); updateUserField(u.id, 'depositPaid', !u.depositPaid); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+                      >
+                        {u.depositPaid ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#10b981' }}>
+                            <FiCheckCircle size={14} />
+                            <span style={{ fontSize: 10, fontWeight: 700 }}>PAID</span>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#ef4444' }}>
+                            <FiXCircle size={14} />
+                            <span style={{ fontSize: 10, fontWeight: 700 }}>UNPAID</span>
+                          </div>
+                        )}
+                        {!u.depositPaid && <BtnXS style={{ padding: '1px 5px', fontSize: 8 }}>Approve</BtnXS>}
+                      </div>
+                    </Td>
+                    <Td>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#3b82f6' }}>{u.referralCount || 0} Refs</div>
+                        <div style={{ fontSize: 9, color: 'var(--color-text-tertiary)' }}>₹{u.bonusEarned || 0} bonus</div>
+                      </div>
+                    </Td>
+                    <Td style={{ textAlign: 'right', paddingRight: 20 }}>
+                      <BtnXS $variant="info" 
+                             onClick={() => { setSelected(u); setFleetMode(false); }} 
+                             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 12px' }}>
+                        Settings
+                      </BtnXS>
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </FleetScroll>
+      </FleetContainer>
+    );
+  };
 
   // ── Render tabs ──
   const renderOverview = () => {
@@ -1166,8 +1563,9 @@ export default function UsersPage() {
         </Sidebar>
 
         {/* ── Main Panel ── */}
-        <Main>
-          {selected ? (
+        <Main id="admin-main-panel">
+          {fleetMode ? renderFleetView() : selected ? (
+
             <>
               {/* Header */}
               <MainHead>
@@ -1203,8 +1601,16 @@ export default function UsersPage() {
                   <BtnXS $variant="info" onClick={() => showToast('FCM message sent')}>
                     <FiBell size={11} /> FCM
                   </BtnXS>
+                  <BtnXS 
+                    $variant={fleetMode ? 'info' : undefined}
+                    onClick={() => setFleetMode(!fleetMode)}
+                    style={{ background: fleetMode ? 'var(--color-background-info)' : 'transparent', fontWeight: 700 }}
+                  >
+                    {fleetMode ? 'Exit Fleet' : 'Fleet Mode'}
+                  </BtnXS>
                 </div>
               </MainHead>
+
 
               {/* Tabs */}
               <TabBar>
@@ -1227,11 +1633,24 @@ export default function UsersPage() {
           ) : (
             <EmptyState style={{ margin: 'auto' }}>
               <FiSearch size={32} style={{ opacity: 0.3, marginBottom: 12 }} />
-              <p>Select a customer from the sidebar</p>
+              <p style={{ marginBottom: '16px' }}>Select a customer from the sidebar</p>
+              <BtnXS 
+                $variant="info"
+                onClick={() => setFleetMode(true)}
+                style={{ margin: '0 auto', padding: '8px 20px', fontWeight: 700 }}
+              >
+                Launch Fleet Board
+              </BtnXS>
             </EmptyState>
+
           )}
         </Main>
       </Wrap>
+
+      <ScrollToTop $show={showToTop} onClick={scrollToTop} title="Scroll to top">
+        <FiChevronUp size={24} />
+      </ScrollToTop>
+
 
       <Toast $show={toastShow}>{toast}</Toast>
       {renderAddressModal()}

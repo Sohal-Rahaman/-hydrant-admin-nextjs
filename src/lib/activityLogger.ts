@@ -16,6 +16,8 @@ export type ActivityAction =
   | 'ARMY_MEMBER_DELETED'
   | 'AUTO_DISPATCH_TRIGGERED'
   | 'SYSTEM_ALERT'
+  | 'ORDER_EDITED_BY_ADMIN'
+  | 'USER_EDITED_BY_ADMIN'
   | 'OTHER';
 
 export interface LogActivityParams {

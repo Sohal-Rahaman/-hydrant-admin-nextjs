@@ -1,4 +1,5 @@
 'use client';
+
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -14,209 +15,152 @@ import {
   FiX,
   FiSave,
   FiPhone,
-  FiUser,
-  FiActivity,
   FiCheckCircle,
-  FiCircle
+  FiCircle,
+  FiActivity,
+  FiMoreVertical
 } from 'react-icons/fi';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, Timestamp } from 'firebase/firestore';
 
 const Container = styled.div`
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
+  padding: 24px;
 `;
 
-const PageHeader = styled.div`
+const TopBar = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 32px;
   flex-wrap: wrap;
   gap: 16px;
 `;
 
-const PageTitle = styled.h1`
-  font-size: 1.8rem;
-  color: #1e293b;
+const Title = styled.h1`
+  font-size: 24px;
+  font-weight: 800;
+  color: #f0f0f0;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0;
-
-  svg {
-    color: #8e2de2;
-  }
 `;
 
-const Controls = styled.div`
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  flex-wrap: wrap;
-`;
-
-const SearchContainer = styled.div`
+const SearchBox = styled.div`
   position: relative;
   width: 300px;
-
-  svg {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #94a3b8;
-  }
 
   @media (max-width: 640px) {
     width: 100%;
   }
-`;
 
-const SearchInput = styled.input`
-  width: 100%;
-  padding: 10px 10px 10px 36px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 0.95rem;
-  transition: all 0.3s ease;
+  svg {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #666;
+  }
 
-  &:focus {
+  input {
+    width: 100%;
+    padding: 12px 16px 12px 48px;
+    background: #181818;
+    border: 1px solid #2e2e2e;
+    border-radius: 12px;
+    color: #f0f0f0;
+    font-size: 14px;
     outline: none;
-    border-color: #8e2de2;
-    box-shadow: 0 0 0 3px rgba(142, 45, 226, 0.1);
+    transition: all 0.2s;
+    
+    &:focus {
+      border-color: #10B981;
+    }
   }
 `;
 
-const Button = styled(motion.button)<{ variant?: 'primary' | 'secondary' | 'danger' | 'success' }>`
-  padding: 10px 20px;
-  border-radius: 8px;
-  border: none;
-  font-weight: 600;
-  font-size: 0.95rem;
-  cursor: pointer;
+const Grid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 24px;
+`;
+
+const MemberCard = styled(motion.div)`
+  background: #181818;
+  border: 1px solid #2e2e2e;
+  border-radius: 20px;
+  padding: 24px;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: #3e3e3e;
+    transform: translateY(-2px);
+  }
+`;
+
+const StatusBadge = styled.button<{ $online: boolean }>`
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: all 0.3s ease;
+  border: 1px solid ${props => props.$online ? 'rgba(16, 185, 129, 0.2)' : '#2e2e2e'};
+  background: ${props => props.$online ? 'rgba(16, 185, 129, 0.1)' : 'transparent'};
+  color: ${props => props.$online ? '#10B981' : '#666'};
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: ${props => props.$online ? 'rgba(16, 185, 129, 0.2)' : '#222'};
+  }
+`;
+
+const ActionButton = styled.button<{ variant?: 'primary' | 'danger' | 'ghost' }>`
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
 
   ${props => {
     switch (props.variant) {
-      case 'primary': return `background: linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%); color: white;`;
-      case 'danger': return `background: #fee2e2; color: #ef4444; border: 1px solid #fecaca;`;
-      case 'success': return `background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0;`;
-      default: return `background: white; color: #475569; border: 1px solid #e2e8f0;`;
+      case 'primary': return `background: #10B981; color: white; &:hover { background: #059669; }`;
+      case 'danger': return `background: rgba(239, 68, 68, 0.1); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.2); &:hover { background: #EF4444; color: white; }`;
+      default: return `background: #222; color: #aaa; border: 1px solid #2e2e2e; &:hover { background: #2a2a2a; border-color: #444; }`;
     }
   }}
-
-  &:hover {
-    transform: translateY(-2px);
-    ${props => props.variant === 'primary' ? 'box-shadow: 0 4px 12px rgba(142, 45, 226, 0.2);' : ''}
-  }
-  
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-  }
-`;
-
-const TableContainer = styled.div`
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-  border: 1px solid #e2e8f0;
-  overflow: hidden;
-`;
-
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-
-  th, td {
-    padding: 16px;
-    text-align: left;
-    border-bottom: 1px solid #e2e8f0;
-  }
-
-  th {
-    background: #f8fafc;
-    font-weight: 600;
-    color: #475569;
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  tr:last-child td {
-    border-bottom: none;
-  }
-
-  tbody tr {
-    transition: all 0.3s ease;
-    &:hover {
-      background: #f8fafc;
-    }
-  }
-
-  @media (max-width: 768px) {
-    th:nth-child(3), td:nth-child(3) { display: none; }
-  }
-`;
-
-const StatusBadge = styled.span<{ $online: boolean }>`
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-
-  ${props => props.$online ? 
-    'background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0;' : 
-    'background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;'
-  }
 `;
 
 const ModalOverlay = styled(motion.div)`
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(4px);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(8px);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
-  padding: 20px;
+  padding: 24px;
 `;
 
 const ModalContent = styled(motion.div)`
-  background: white;
-  border-radius: 16px;
+  background: #181818;
+  border: 1px solid #2e2e2e;
+  border-radius: 24px;
   padding: 32px;
   width: 100%;
-  max-width: 500px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-`;
-
-const ModalTitle = styled.h2`
-  margin: 0 0 24px 0;
-  font-size: 1.5rem;
-  color: #1e293b;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-
-  svg {
-    color: #8e2de2;
-  }
+  max-width: 480px;
 `;
 
 const FormGroup = styled.div`
@@ -224,34 +168,28 @@ const FormGroup = styled.div`
 
   label {
     display: block;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #475569;
+    font-size: 11px;
+    font-weight: 700;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
     margin-bottom: 8px;
   }
 
   input, select {
     width: 100%;
-    padding: 10px 12px;
-    border: 1px solid #cbd5e1;
-    border-radius: 8px;
-    font-size: 0.95rem;
-    color: #1e293b;
-    transition: all 0.3s ease;
-
+    padding: 14px;
+    background: #0f0f0f;
+    border: 1px solid #2e2e2e;
+    border-radius: 12px;
+    color: #f0f0f0;
+    font-size: 14px;
+    outline: none;
+    
     &:focus {
-      outline: none;
-      border-color: #8e2de2;
-      box-shadow: 0 0 0 3px rgba(142, 45, 226, 0.1);
+      border-color: #10B981;
     }
   }
-`;
-
-const ModalActions = styled.div`
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 32px;
 `;
 
 interface ArmyMember {
@@ -272,7 +210,6 @@ export default function ArmyManagementPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<ArmyMember | null>(null);
   
-  // Form state
   const [formData, setFormData] = useState({
     name: '',
     phoneNumber: '',
@@ -319,8 +256,8 @@ export default function ArmyManagementPage() {
 
   const handleSave = async () => {
     if (!formData.name || !formData.phoneNumber) {
-      alert('Please fill in all fields');
-      return;
+       alert('Please fill in all fields');
+       return;
     }
 
     setIsSaving(true);
@@ -356,7 +293,7 @@ export default function ArmyManagementPage() {
       }
       closeModal();
     } catch (error) {
-      console.error('Error saving army member:', error);
+      console.error(error);
       alert('Error saving data');
     } finally {
       setIsSaving(false);
@@ -376,8 +313,7 @@ export default function ArmyManagementPage() {
           details: `Deleted army member: ${member.name}`
         });
       } catch (error) {
-        console.error('Error deleting army member:', error);
-        alert('Error deleting data');
+        console.error(error);
       }
     }
   };
@@ -389,7 +325,7 @@ export default function ArmyManagementPage() {
         updatedAt: Timestamp.now()
       });
     } catch (error) {
-      console.error('Error toggling status:', error);
+      console.error(error);
     }
   };
 
@@ -399,146 +335,161 @@ export default function ArmyManagementPage() {
   );
 
   return (
-    <Container>
-      <PageHeader>
-        <PageTitle>
-          <FiTruck /> Army Management
-        </PageTitle>
-        <Controls>
-          <SearchContainer>
-            <FiSearch />
-            <SearchInput
-              type="text"
-              placeholder="Search by name or phone..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </SearchContainer>
-          <Button variant="primary" onClick={() => handleOpenModal()}>
-            <FiUserPlus /> Add Army Member
-          </Button>
-        </Controls>
-      </PageHeader>
+    <div style={{ background: '#0f0f0f', minHeight: '100vh', color: '#f0f0f0' }}>
+      <Container>
+        <TopBar>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+            <Title><FiTruck /> Army Ops</Title>
+            <SearchBox>
+              <FiSearch />
+              <input 
+                placeholder="Search fleet..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </SearchBox>
+          </div>
+          <ActionButton variant="primary" onClick={() => handleOpenModal()} style={{ padding: '12px 20px' }}>
+            <FiUserPlus /> Recruit Partner
+          </ActionButton>
+        </TopBar>
 
-      <TableContainer>
         {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>Loading army data...</div>
-        ) : filteredArmy.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>No army members found.</div>
+          <div style={{ padding: '100px', textAlign: 'center', color: '#666' }}>Loading Army data...</div>
         ) : (
-          <Table>
-            <thead>
-              <tr>
-                <th>Member</th>
-                <th>Status</th>
-                <th>Active Orders</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredArmy.map((member) => (
-                <tr key={member.id}>
-                  <td>
-                    <div style={{ fontWeight: 700, color: '#1e293b', fontSize: '1rem' }}>{member.name}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', color: '#6366f1', marginTop: '4px', fontWeight: 600 }}>
-                      <FiPhone size={14} /> {member.phoneNumber}
+          <Grid>
+            {filteredArmy.map((member) => (
+              <MemberCard
+                key={member.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{ 
+                      width: '48px', 
+                      height: '48px', 
+                      borderRadius: '12px', 
+                      background: '#10B981', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: '18px',
+                      boxShadow: '0 8px 16px rgba(16, 185, 129, 0.1)'
+                    }}>
+                      {member.name[0].toUpperCase()}
                     </div>
-                  </td>
-                  <td>
-                    <StatusBadge 
-                      $online={member.isOnline} 
-                      onClick={() => toggleStatus(member)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {member.isOnline ? <FiCheckCircle /> : <FiCircle />}
-                      {member.isOnline ? 'Online' : 'Offline'}
-                    </StatusBadge>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#475569', fontWeight: 600 }}>
-                      <FiActivity size={16} color={member.activeOrdersCount > 0 ? '#8e2de2' : '#94a3b8'} />
-                      {member.activeOrdersCount} Orders
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '16px', color: '#f0f0f0' }}>{member.name}</div>
+                      <div style={{ fontSize: '13px', color: '#666', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                        <FiPhone size={12} /> {member.phoneNumber}
+                      </div>
                     </div>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <Button variant="secondary" onClick={() => handleOpenModal(member)} style={{ padding: '8px 12px' }}>
-                        <FiEdit3 />
-                      </Button>
-                      <Button variant="danger" onClick={() => handleDelete(member)} style={{ padding: '8px 12px' }}>
-                        <FiTrash2 />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </TableContainer>
+                  </div>
+                  <StatusBadge $online={member.isOnline} onClick={() => toggleStatus(member)}>
+                    {member.isOnline ? <FiCheckCircle /> : <FiCircle />}
+                    {member.isOnline ? 'Online' : 'Offline'}
+                  </StatusBadge>
+                </div>
 
-      <AnimatePresence>
-        {isModalOpen && (
-          <ModalOverlay
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={closeModal}
-          >
-            <ModalContent
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: '1fr 1fr', 
+                  gap: '12px', 
+                  background: '#0f0f0f', 
+                  padding: '16px', 
+                  borderRadius: '16px',
+                  marginBottom: '20px'
+                }}>
+                  <div>
+                    <div style={{ fontSize: '10px', color: '#666', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Current Load</div>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: member.activeOrdersCount > 0 ? '#10B981' : '#f0f0f0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <FiActivity size={14} /> {member.activeOrdersCount} Tasks
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '10px', color: '#666', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Performance</div>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: '#f0f0f0' }}>100%</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <ActionButton onClick={() => handleOpenModal(member)} style={{ flex: 1 }}>
+                    <FiEdit3 /> Manage
+                  </ActionButton>
+                  <ActionButton variant="danger" onClick={() => handleDelete(member)}>
+                    <FiTrash2 />
+                  </ActionButton>
+                </div>
+              </MemberCard>
+            ))}
+          </Grid>
+        )}
+
+        <AnimatePresence>
+          {isModalOpen && (
+            <ModalOverlay
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeModal}
             >
-              <ModalTitle>
-                {editingMember ? <FiEdit3 /> : <FiUserPlus />}
-                {editingMember ? 'Edit Army Member' : 'Add New Army Member'}
-              </ModalTitle>
+              <ModalContent
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                  <h2 style={{ fontSize: '20px', fontWeight: 800 }}>{editingMember ? 'Edit Partner' : 'Recruit Partner'}</h2>
+                  <ActionButton variant="ghost" onClick={closeModal} style={{ padding: '8px' }}>
+                    <FiX size={20} />
+                  </ActionButton>
+                </div>
 
-              <FormGroup>
-                <label>Full Name</label>
-                <input 
-                  type="text" 
-                  placeholder="Enter name"
-                  value={formData.name}
-                  onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))}
-                />
-              </FormGroup>
+                <FormGroup>
+                  <label>Full Name</label>
+                  <input 
+                    type="text" 
+                    placeholder="Enter name"
+                    value={formData.name}
+                    onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))}
+                  />
+                </FormGroup>
 
-              <FormGroup>
-                <label>Phone Number</label>
-                <input 
-                  type="text" 
-                  placeholder="+91..."
-                  value={formData.phoneNumber}
-                  onChange={(e) => setFormData(p => ({ ...p, phoneNumber: e.target.value }))}
-                />
-              </FormGroup>
+                <FormGroup>
+                  <label>Phone Number</label>
+                  <input 
+                    type="text" 
+                    placeholder="+91..."
+                    value={formData.phoneNumber}
+                    onChange={(e) => setFormData(p => ({ ...p, phoneNumber: e.target.value }))}
+                  />
+                </FormGroup>
 
-              <FormGroup>
-                <label>Initial Status</label>
-                <select 
-                  value={formData.isOnline ? 'online' : 'offline'} 
-                  onChange={(e) => setFormData(p => ({ ...p, isOnline: e.target.value === 'online' }))}
-                >
-                  <option value="offline">Offline</option>
-                  <option value="online">Online</option>
-                </select>
-              </FormGroup>
+                <FormGroup>
+                  <label>Operational Status</label>
+                  <select 
+                    value={formData.isOnline ? 'online' : 'offline'} 
+                    onChange={(e) => setFormData(p => ({ ...p, isOnline: e.target.value === 'online' }))}
+                  >
+                    <option value="offline">Offline / Resting</option>
+                    <option value="online">Online / Active</option>
+                  </select>
+                </FormGroup>
 
-              <ModalActions>
-                <Button variant="secondary" onClick={closeModal} disabled={isSaving}>
-                  <FiX /> Cancel
-                </Button>
-                <Button variant="primary" onClick={handleSave} disabled={isSaving}>
-                  <FiSave /> {isSaving ? 'Saving...' : 'Save Member'}
-                </Button>
-              </ModalActions>
-            </ModalContent>
-          </ModalOverlay>
-        )}
-      </AnimatePresence>
-    </Container>
+                <div style={{ display: 'flex', gap: '12px', marginTop: '32px' }}>
+                  <ActionButton onClick={closeModal} style={{ flex: 1 }}>Cancel</ActionButton>
+                  <ActionButton variant="primary" onClick={handleSave} disabled={isSaving} style={{ flex: 2 }}>
+                    <FiSave /> {isSaving ? 'Processing...' : 'Save Changes'}
+                  </ActionButton>
+                </div>
+              </ModalContent>
+            </ModalOverlay>
+          )}
+        </AnimatePresence>
+      </Container>
+    </div>
   );
 }

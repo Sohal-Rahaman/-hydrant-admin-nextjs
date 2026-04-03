@@ -29,7 +29,9 @@ import {
   FiAlertCircle,
   FiMessageSquare,
   FiShoppingCart,
-  FiGift
+  FiGift,
+  FiLink,
+  FiGrid
 } from 'react-icons/fi';
 import { useAuth } from '@/context/AuthContext';
 
@@ -320,6 +322,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { path: '/admin/orders', label: 'Orders', icon: FiPackage },
     { path: '/admin/create-order', label: 'Create Order', icon: FiShoppingCart },
     { path: '/admin/users', label: 'Users', icon: FiUsers },
+    { path: '/admin/users?mode=fleet', label: 'Fleet Board', icon: FiGrid },
     { path: '/admin/crm', label: 'CRM & Leads', icon: FiBriefcase },
     { path: '/admin/subscriptions', label: 'Subscriptions', icon: FiRepeat },
     { path: '/admin/wallet', label: 'Wallet Mgmt', icon: FiCreditCard },
@@ -337,6 +340,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { path: '/admin/deletion-requests', label: 'Deletion Requests', icon: FiUserX },
     { path: '/admin/delivery', label: 'Delivery Map', icon: FiMapPin },
     { path: '/admin/analytics', label: 'Analytics', icon: FiBarChart },
+    { path: '/admin/settings/integrations', label: 'App Integrations', icon: FiLink },
   ];
 
   const handleNavClick = (path: string) => {

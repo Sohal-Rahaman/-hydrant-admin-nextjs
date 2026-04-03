@@ -39,123 +39,123 @@ import { doc, onSnapshot, getFirestore, collection, getDocs } from 'firebase/fir
 import { generateCSV, downloadCSV, generateFilename, UserDataForCSV } from '@/lib/csvExport';
 
 const AnalyticsContainer = styled.div`
-  padding: 20px;
-  max-width: 1400px;
+  padding: 24px;
+  max-width: 1600px;
   margin: 0 auto;
+  background: #0f0f0f;
+  min-height: calc(100vh - 64px);
+  color: #f0f0f0;
 `;
 
 const Header = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 30px;
-  flex-wrap: wrap;
-  gap: 20px;
+  margin-bottom: 32px;
+  gap: 24px;
 `;
 
 const TitleSection = styled.div`
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 16px;
+`;
+
+const Title = styled.h1`
+  color: #f0f0f0;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 `;
 
 const AnalyticsLogo = styled(Image)`
   width: 45px;
   height: 45px;
-  border-radius: 10px;
+  border-radius: 12px;
   object-fit: cover;
 `;
 
-const Title = styled.h1`
-  color: #333;
-  margin: 0;
-  font-size: 2rem;
-  font-weight: 700;
-`;
-
 const RefreshButton = styled(motion.button)`
-  background: linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%);
+  background: #10B981;
   color: white;
   border: none;
-  padding: 12px 20px;
-  border-radius: 10px;
+  padding: 10px 20px;
+  border-radius: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 600;
-  transition: all 0.3s ease;
+  font-weight: 700;
+  font-size: 14px;
+  transition: all 0.2s;
 
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(142, 45, 226, 0.4);
+    background: #059669;
   }
 
   &:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 `;
 
 const StatsOverview = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-  margin-bottom: 30px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
 `;
 
-const StatCard = styled(motion.div) <{ color?: string }>`
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-  border: 1px solid #f0f0f0;
-  text-align: center;
-  position: relative;
-  overflow: hidden;
+const StatCard = styled(motion.div)<{ color?: string }>`
+  background: #181818;
+  padding: 24px;
+  border-radius: 24px;
+  border: 1px solid #2e2e2e;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.2s;
 
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: ${props => props.color || 'linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)'};
+  &:hover {
+    border-color: #444;
   }
 `;
 
 const StatIcon = styled.div<{ color?: string }>`
-  width: 50px;
-  height: 50px;
-  border-radius: 10px;
-  background: ${props => props.color || 'linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)'};
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: ${props => props.color || 'rgba(16, 185, 129, 0.1)'};
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
-  font-size: 1.3rem;
-  margin: 0 auto 15px;
+  color: ${props => (props.color && props.color !== 'rgba(16, 185, 129, 0.1)') ? 'white' : '#10B981'};
+  font-size: 1.5rem;
 `;
 
 const StatValue = styled.div`
-  font-size: 1.8rem;
-  font-weight: 700;
-  color: #333;
-  margin-bottom: 5px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #f0f0f0;
 `;
 
 const StatLabel = styled.div`
   color: #666;
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 `;
 
 const ChartsGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr;
-  gap: 30px;
-  margin-bottom: 30px;
+  gap: 24px;
+  margin-bottom: 32px;
 
   @media (min-width: 1200px) {
     grid-template-columns: 2fr 1fr;
@@ -163,27 +163,26 @@ const ChartsGrid = styled.div`
 `;
 
 const ChartCard = styled(motion.div)`
-  background: white;
-  padding: 25px;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid #f0f0f0;
+  background: #181818;
+  padding: 32px;
+  border-radius: 32px;
+  border: 1px solid #2e2e2e;
 `;
 
 const ChartTitle = styled.h3`
-  color: #333;
-  margin: 0 0 20px 0;
-  font-size: 1.2rem;
-  font-weight: 600;
+  color: #f0f0f0;
+  margin: 0 0 24px 0;
+  font-size: 18px;
+  font-weight: 800;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 `;
 
 const MetricsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-  gap: 25px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
 `;
 
 const LoadingSpinner = styled(motion.div)`
@@ -218,15 +217,15 @@ const InfoBox = styled.div`
 
 // Chart color schemes
 const COLORS = {
-  primary: '#8e2de2',
-  secondary: '#4a00e0',
-  success: '#10b981',
-  warning: '#f59e0b',
-  danger: '#ef4444',
-  info: '#3b82f6'
+  primary: '#10B981',
+  secondary: '#059669',
+  success: '#10B981',
+  warning: '#F59E0B',
+  danger: '#EF4444',
+  info: '#3B82F6'
 };
 
-const PIE_COLORS = ['#8e2de2', '#4a00e0', '#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
+const PIE_COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 
 interface OrderData {
   id: string;
@@ -737,16 +736,19 @@ export default function AnalyticsPage() {
                   <stop offset="95%" stopColor={COLORS.success} stopOpacity={0.1} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#2e2e2e" />
               <XAxis dataKey="date" stroke="#666" />
               <YAxis stroke="#666" />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                  backgroundColor: 'rgba(24, 24, 24, 0.9)',
+                  border: '1px solid #2e2e2e',
+                  borderRadius: '16px',
+                  backdropFilter: 'blur(20px)',
+                  boxShadow: '0 12px 24px rgba(0,0,0,0.5)',
+                  color: '#f0f0f0'
                 }}
+                itemStyle={{ color: '#f0f0f0' }}
               />
               <Legend />
               <Area
@@ -800,11 +802,14 @@ export default function AnalyticsPage() {
                   name
                 ]}
                 contentStyle={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                  backgroundColor: 'rgba(24, 24, 24, 0.9)',
+                  border: '1px solid #2e2e2e',
+                  borderRadius: '16px',
+                  backdropFilter: 'blur(20px)',
+                  boxShadow: '0 12px 24px rgba(0,0,0,0.5)',
+                  color: '#f0f0f0'
                 }}
+                itemStyle={{ color: '#f0f0f0' }}
               />
               <Legend />
             </PieChart>
@@ -826,7 +831,7 @@ export default function AnalyticsPage() {
           </ChartTitle>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={revenueData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#2e2e2e" />
               <XAxis dataKey="date" stroke="#666" />
               <YAxis stroke="#666" />
               <Tooltip
@@ -835,11 +840,14 @@ export default function AnalyticsPage() {
                   name === 'revenue' ? 'Revenue' : 'Delivered Orders'
                 ]}
                 contentStyle={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                  backgroundColor: 'rgba(24, 24, 24, 0.9)',
+                  border: '1px solid #2e2e2e',
+                  borderRadius: '16px',
+                  backdropFilter: 'blur(20px)',
+                  boxShadow: '0 12px 24px rgba(0,0,0,0.5)',
+                  color: '#f0f0f0'
                 }}
+                itemStyle={{ color: '#f0f0f0' }}
               />
               <Legend />
               <Line
@@ -874,16 +882,19 @@ export default function AnalyticsPage() {
           </ChartTitle>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={dailyOrdersData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#2e2e2e" />
               <XAxis dataKey="date" stroke="#666" />
               <YAxis stroke="#666" />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                  backgroundColor: 'rgba(24, 24, 24, 0.9)',
+                  border: '1px solid #2e2e2e',
+                  borderRadius: '16px',
+                  backdropFilter: 'blur(20px)',
+                  boxShadow: '0 12px 24px rgba(0,0,0,0.5)',
+                  color: '#f0f0f0'
                 }}
+                itemStyle={{ color: '#f0f0f0' }}
               />
               <Legend />
               <Bar
@@ -914,17 +925,16 @@ export default function AnalyticsPage() {
 // ════════════════════════════════════════════════════════════════
 
 const OISection = styled.div`
-  margin-top: 40px;
+  margin-top: 48px;
   display: flex;
   flex-direction: column;
   gap: 32px;
 `;
 
 const OICard = styled.div`
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.07);
-  border: 1px solid #f0f0f0;
+  background: #181818;
+  border-radius: 32px;
+  border: 1px solid #2e2e2e;
   overflow: hidden;
 `;
 
@@ -932,95 +942,101 @@ const OIHead = styled.div<{ $color?: string }>`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  background: ${p => p.$color || '#f8fafc'};
-  border-bottom: 1px solid #e8ecf0;
+  padding: 24px 32px;
+  background: #222;
+  border-bottom: 1px solid #2e2e2e;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 16px;
 `;
 
 const OITitle = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 700;
-  color: #1a1a18;
+  gap: 12px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #f0f0f0;
 `;
 
 const OIBadge = styled.span<{ $color: string }>`
   background: ${p => p.$color};
   color: white;
-  border-radius: 20px;
-  padding: 2px 10px;
-  font-size: 12px;
-  font-weight: 700;
+  border-radius: 12px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 `;
 
 const ExportBtnRow = styled.div`
   display: flex;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
 `;
 
 const ExportBtn = styled.button<{ $variant?: 'green' | 'blue' | 'orange' }>`
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 600;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 700;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s;
   background: ${p =>
-    p.$variant === 'green' ? '#10b981' :
-    p.$variant === 'blue' ? '#3b82f6' :
-    p.$variant === 'orange' ? '#f59e0b' :
-    '#6b7280'};
+    p.$variant === 'green' ? '#10B981' :
+    p.$variant === 'blue' ? '#3B82F6' :
+    p.$variant === 'orange' ? '#F59E0B' :
+    '#333'};
   color: white;
-  &:hover { opacity: 0.85; transform: translateY(-1px); }
+  &:hover { 
+    transform: translateY(-2px);
+    filter: brightness(1.1);
+  }
 `;
 
 const OITable = styled.table`
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: 13px;
 `;
 
 const OITh = styled.th`
   text-align: left;
-  padding: 10px 14px;
+  padding: 16px 24px;
   font-size: 11px;
-  font-weight: 600;
-  color: #64748b;
+  font-weight: 700;
+  color: #666;
   text-transform: uppercase;
-  letter-spacing: .04em;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  letter-spacing: .1em;
+  background: #111;
+  border-bottom: 1px solid #2e2e2e;
   white-space: nowrap;
 `;
 
 const OITd = styled.td`
-  padding: 10px 14px;
-  border-bottom: 1px solid #f1f5f9;
-  color: #1e293b;
+  padding: 16px 24px;
+  border-bottom: 1px solid #2e2e2e;
+  color: #ccc;
   vertical-align: middle;
 `;
 
 const CLink = styled.a`
-  color: #2563eb;
+  color: #10B981;
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
   &:hover { text-decoration: underline; }
 `;
 
 const EmptyRow = styled.div`
-  padding: 40px;
+  padding: 60px;
   text-align: center;
-  color: #94a3b8;
+  color: #666;
   font-size: 14px;
+  font-weight: 600;
 `;
 
 const JAR_ICON = '🫙';
