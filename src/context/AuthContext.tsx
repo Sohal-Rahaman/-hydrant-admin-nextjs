@@ -6,6 +6,7 @@ import { onAuthStateChanged, User, ConfirmationResult } from 'firebase/auth';
 
 interface AuthContextType {
   currentUser: User | null;
+  userData: any | null; // Compatibility layer for legacy components
   isAdmin: boolean;
   role: 'superadmin' | null;
   loading: boolean;
@@ -72,6 +73,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const value: AuthContextType = {
     currentUser,
+    userData: currentUser ? {
+      role: role,
+      displayName: currentUser.displayName || (role === 'superadmin' ? 'Super Admin' : 'Admin User'),
+      email: currentUser.email,
+      photoURL: currentUser.photoURL,
+      phoneNumber: currentUser.phoneNumber
+    } : null,
     isAdmin,
     role,
     loading,
