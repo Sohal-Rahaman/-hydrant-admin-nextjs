@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
-import { runTransaction, doc, collection } from 'firebase/firestore';
+import { runTransaction, doc, collection, Timestamp } from 'firebase/firestore';
 import { sendEmail } from '@/lib/email';
+import { executeWalletUpdate } from '@/lib/wallet';
 
 export async function POST(request: Request) {
   try {
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
     let userEmail = '';
     let insufficientFunds = false;
 
-    // ATOMIC TRANSACTION: Read Wallet -> Check Balance -> Deduct -> Create Order
+    // ATOMIC TRANSACTION: Read Wallet -> Deduct (Allow Negative) -> Record Txn -> Create Order
     await runTransaction(db, async (transaction) => {
       const userDoc = await transaction.get(userRef);
       if (!userDoc.exists()) {
@@ -31,21 +32,20 @@ export async function POST(request: Request) {
       }
 
       const userData = userDoc.data();
-      const currentBalance = userData.walletBalance || 0;
       userName = userData.name || userData.displayName || 'Customer';
       userEmail = userData.email || '';
 
-      if (currentBalance < totalCost) {
-        insufficientFunds = true;
-        // We abort the transaction logic here but we don't throw an error, 
-        // we just exit cleanly to handle the notification immediately after.
-        return;
-      }
+      // 1. Deduct Wallet using Ledger Helper (Allowing negative balance)
+      const { new_balance } = await executeWalletUpdate(transaction, {
+        userId,
+        amount: -totalCost,
+        type: 'ORDER_PAYMENT',
+        referenceId: newOrderRef.id,
+        description: `Payment for Order of ${quantity} jars`,
+        createdBy: userId // In client flow, user is the actor
+      });
 
-      finalBalance = currentBalance - totalCost;
-
-      // 1. Deduct Wallet
-      transaction.update(userRef, { walletBalance: finalBalance });
+      finalBalance = new_balance;
 
       // 2. Create Confirmed Order
       const orderPayload = {
@@ -58,31 +58,26 @@ export async function POST(request: Request) {
         status: 'confirmed',
         paymentMethod: 'wallet',
         address: address || userData.address || '',
-        createdAt: new Date(),
-        updatedAt: new Date()
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
       };
 
       transaction.set(newOrderRef, orderPayload);
     });
 
-    if (insufficientFunds) {
-      // TRIGGER REJECTION EMAIL
-      if (userEmail) {
-        await sendEmail(
-          userEmail,
-          "Action Required: Hydrant Order Failed due to Low Balance",
-          `<p>Hi ${userName},</p>
-           <p>Your order for ${quantity}x 20L Water Jars could not be placed because your wallet balance (₹${finalBalance}) is insufficient for the total cost of ₹${totalCost}.</p>
-           <p>Please top up your wallet via the App to schedule tomorrow's delivery.</p>
-           <br><p>Stay Hydrated,<br>Team Hydrant</p>`
-        );
-      }
-      return NextResponse.json({ 
-        success: false, 
-        message: 'Insufficient Funds. Order rejected.', 
-        required: totalCost 
-      }, { status: 402 }); 
+    // Send warning email if balance went negative
+    if (finalBalance < 0 && userEmail) {
+      await sendEmail(
+        userEmail,
+        "Order Processed: HYDRANT 2.0 Trust Credit Applied",
+        `<p>Hi ${userName},</p>
+         <p>Your order for ${quantity}x 20L Water Jars has been placed successfully!</p>
+         <p>Your current wallet balance is <strong>-₹${Math.abs(finalBalance)}</strong>. We've processed this order using our Trust Credit system to ensure you don't run out of water.</p>
+         <p>Please top up your wallet at your earliest convenience to maintain your service.</p>
+         <br><p>Stay Hydrated,<br>Team Hydrant</p>`
+      );
     }
+
 
     // Success response
     return NextResponse.json({ 

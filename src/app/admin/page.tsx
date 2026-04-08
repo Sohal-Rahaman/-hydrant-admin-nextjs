@@ -48,18 +48,18 @@ const ChartsGrid = styled.div`
 `;
 
 const ChartCard = styled(motion.div)`
-  background: white;
-  border-radius: 24px;
+  background: var(--color-background-secondary);
+  border-radius: var(--radius-technical);
   padding: 30px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--color-border-primary);
 
   h3 {
     margin-top: 0;
     margin-bottom: 25px;
-    color: #124D34;
-    font-size: 1.2rem;
-    font-weight: 800;
+    color: var(--color-accent-cyan);
+    font-family: 'Fira Code', monospace;
+    font-size: 1rem;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 1px;
   }
@@ -88,11 +88,13 @@ const DashboardLogo = styled(Image)`
 `;
 
 const Title = styled.h1`
-  color: #124D34;
+  color: var(--foreground);
   margin: 0;
-  font-size: 2.2rem;
-  font-weight: 900;
+  font-size: 1.8rem;
+  font-weight: 700;
   letter-spacing: -0.5px;
+  font-family: 'Fira Code', monospace;
+  text-transform: uppercase;
 `;
 
 const ActionButtons = styled.div`
@@ -102,27 +104,26 @@ const ActionButtons = styled.div`
 `;
 
 const ActionButton = styled(motion.button)`
-  background: #124D34;
-  color: white;
+  background: var(--color-accent-cyan);
+  color: #000;
   border: none;
-  padding: 12px 24px;
-  border-radius: 14px;
+  padding: 10px 24px;
+  border-radius: var(--radius-technical);
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 700;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(18, 77, 52, 0.2);
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
 
   &:hover {
-    transform: translateY(-2px);
-    background: #1A5F45;
-    box-shadow: 0 6px 16px rgba(18, 77, 52, 0.3);
+    filter: brightness(1.1);
+    box-shadow: 0 0 15px rgba(0, 229, 255, 0.3);
   }
 
   &:disabled {
-    opacity: 0.6;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 `;
@@ -135,17 +136,16 @@ const StatsGrid = styled.div`
 `;
 
 const StatCard = styled(motion.div)<{ color?: string }>`
-  background: white;
-  padding: 30px;
-  border-radius: 24px;
-  box-shadow: 0 4px 20px rgba(18, 77, 52, 0.05);
-  border: 1px solid #f0f0f0;
+  background: var(--color-background-secondary);
+  padding: 24px;
+  border-radius: var(--radius-technical);
+  border: 1px solid var(--color-border-primary);
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 200px;
+  min-height: 180px;
 
   &::before {
     content: '';
@@ -153,8 +153,9 @@ const StatCard = styled(motion.div)<{ color?: string }>`
     top: 0;
     left: 0;
     right: 0;
-    height: 6px;
-    background: ${props => props.color || 'linear-gradient(135deg, #124D34 0%, #1A5F45 100%)'};
+    height: 2px;
+    background: ${props => props.color || 'var(--color-accent-cyan)'};
+    opacity: 0.8;
   }
 `;
 
@@ -166,29 +167,33 @@ const StatHeader = styled.div`
 `;
 
 const StatIcon = styled.div<{ color?: string }>`
-  width: 54px;
-  height: 54px;
-  border-radius: 16px;
-  background: ${props => props.color || 'rgba(18, 77, 52, 0.08)'};
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-technical);
+  background: ${props => props.color ? `${props.color}15` : 'rgba(0, 229, 255, 0.1)'};
   display: flex;
   align-items: center;
   justify-content: center;
-  color: ${props => props.color ? 'white' : '#124D34'};
-  font-size: 1.4rem;
+  color: ${props => props.color || 'var(--color-accent-cyan)'};
+  font-size: 1.2rem;
+  border: 1px solid ${props => props.color ? `${props.color}30` : 'rgba(0, 229, 255, 0.2)'};
 `;
 
 const StatValue = styled.div`
-  font-size: 3.5rem;
-  font-weight: 900;
-  color: #124D34;
+  font-family: 'Fira Code', monospace;
+  font-size: 2.8rem;
+  font-weight: 700;
+  color: var(--foreground);
   margin-bottom: 4px;
-  letter-spacing: -2px;
+  letter-spacing: -1px;
 `;
 
 const StatLabel = styled.div`
-  color: #666;
-  font-size: 1rem;
-  font-weight: 500;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 `;
 
 const StatTrend = styled.div`
@@ -212,11 +217,10 @@ const AnalyticsGrid = styled.div`
 `;
 
 const AnalyticsCard = styled(motion.div)`
-  background: white;
-  padding: 35px;
-  border-radius: 24px;
-  box-shadow: 0 4px 25px rgba(18, 77, 52, 0.04);
-  border: 1px solid #f0f0f0;
+  background: var(--color-background-secondary);
+  padding: 30px;
+  border-radius: var(--radius-technical);
+  border: 1px solid var(--color-border-primary);
 `;
 
 const CardTitle = styled.h3`
@@ -230,8 +234,8 @@ const PincodeItem = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 15px 0;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border-primary);
 
   &:last-child {
     border-bottom: none;
@@ -243,19 +247,22 @@ const PincodeDetails = styled.div`
 `;
 
 const PincodeLabel = styled.div`
+  font-family: 'Fira Code', monospace;
   font-weight: 600;
-  color: #333;
+  color: var(--foreground);
   margin-bottom: 5px;
+  font-size: 0.95rem;
 `;
 
 const PincodeStats = styled.div`
-  color: #666;
-  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
 `;
 
 const PincodeRevenue = styled.div`
+  font-family: 'Fira Code', monospace;
   font-weight: 700;
-  color: #10b981;
+  color: var(--color-accent-green);
   font-size: 1.1rem;
 `;
 
@@ -281,10 +288,12 @@ const OrderInfo = styled.div`
 `;
 
 const OrderId = styled.div`
+  font-family: 'Fira Code', monospace;
   font-weight: 600;
-  color: #333;
+  color: var(--color-accent-cyan);
   margin-bottom: 4px;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  letter-spacing: -0.5px;
 `;
 
 const OrderDetails = styled.div`
@@ -296,24 +305,26 @@ const OrderDetails = styled.div`
 `;
 
 const OrderStatus = styled.div<{ status: string }>`
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-technical);
+  font-size: 0.7rem;
+  font-weight: 700;
   text-transform: uppercase;
+  font-family: 'Fira Code', monospace;
+  border: 1px solid currentColor;
   
   ${props => {
     switch (props.status) {
       case 'pending':
-        return `background: #fef3c7; color: #92400e;`;
+        return `background: rgba(251, 191, 36, 0.1); color: #FBBF24;`;
       case 'processing':
-        return `background: #dbeafe; color: #1e40af;`;
+        return `background: rgba(0, 229, 255, 0.1); color: #00E5FF;`;
       case 'completed':
-        return `background: #d1fae5; color: #065f46;`;
+        return `background: rgba(163, 230, 53, 0.1); color: #A3E635;`;
       case 'cancelled':
-        return `background: #fee2e2; color: #991b1b;`;
+        return `background: rgba(248, 113, 113, 0.1); color: #F87171;`;
       default:
-        return `background: #f3f4f6; color: #374151;`;
+        return `background: rgba(148, 163, 184, 0.1); color: #94A3B8;`;
     }
   }}
 `;
@@ -325,17 +336,18 @@ const EmptyState = styled.div`
 `;
 
 const InfoBox = styled.div`
-  background: #e0f2fe;
-  border: 1px solid #0891b2;
-  color: #0c4a6e;
-  padding: 15px;
-  border-radius: 10px;
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid var(--color-border-tertiary);
+  color: var(--color-accent-cyan);
+  padding: 12px 16px;
+  border-radius: var(--radius-technical);
   margin-bottom: 20px;
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   line-height: 1.5;
+  font-family: 'Fira Sans', sans-serif;
 `;
 
 const LoadingSpinner = styled(motion.div)`
@@ -589,7 +601,6 @@ const toDate = (dateValue: any): Date => {
         
         if (snapshot.empty) {
           console.warn('⚠️ Orders collection is empty!');
-          console.log('📋 Consider adding some test orders to see data in dashboard');
           setOrders([]);
           setRecentOrders([]);
           setPincodeAnalytics({});
@@ -970,22 +981,28 @@ Check console for detailed logs`);
             <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorOrders" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#124D34" stopOpacity={0.1}/>
-                  <stop offset="95%" stopColor="#124D34" stopOpacity={0}/>
+                  <stop offset="5%" stopColor="var(--color-accent-cyan)" stopOpacity={0.2}/>
+                  <stop offset="95%" stopColor="var(--color-accent-cyan)" stopOpacity={0}/>
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#666', fontSize: 12}} />
-              <YAxis axisLine={false} tickLine={false} tick={{fill: '#666', fontSize: 12}} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border-primary)" />
+              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: 'var(--color-text-tertiary)', fontSize: 10, fontFamily: 'Fira Code'}} />
+              <YAxis axisLine={false} tickLine={false} tick={{fill: 'var(--color-text-tertiary)', fontSize: 10, fontFamily: 'Fira Code'}} />
               <Tooltip 
-                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                contentStyle={{ 
+                  borderRadius: 'var(--radius-technical)', 
+                  background: 'var(--color-background-tertiary)',
+                  border: '1px solid var(--color-border-primary)',
+                  fontFamily: 'Fira Code',
+                  fontSize: '12px'
+                }}
               />
               <Area 
                 type="monotone" 
                 dataKey="orders" 
                 name="Total Orders"
-                stroke="#124D34" 
-                strokeWidth={3}
+                stroke="var(--color-accent-cyan)" 
+                strokeWidth={2}
                 fillOpacity={1} 
                 fill="url(#colorOrders)" 
               />
@@ -1003,14 +1020,20 @@ Check console for detailed logs`);
           <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer>
               <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#666', fontSize: 12}} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#666', fontSize: 12}} allowDecimals={false} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border-primary)" />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: 'var(--color-text-tertiary)', fontSize: 10, fontFamily: 'Fira Code'}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fill: 'var(--color-text-tertiary)', fontSize: 10, fontFamily: 'Fira Code'}} allowDecimals={false} />
                 <Tooltip 
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                  cursor={{ fill: '#f3f4f6' }}
+                  contentStyle={{ 
+                    borderRadius: 'var(--radius-technical)', 
+                    background: 'var(--color-background-tertiary)',
+                    border: '1px solid var(--color-border-primary)',
+                    fontFamily: 'Fira Code',
+                    fontSize: '12px'
+                  }}
+                  cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }}
                 />
-                <Bar dataKey="newUsers" name="New Users" fill="#10B981" radius={[6, 6, 0, 0]} barSize={30} />
+                <Bar dataKey="newUsers" name="New Users" fill="var(--color-accent-green)" radius={[2, 2, 0, 0]} barSize={24} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1019,8 +1042,8 @@ Check console for detailed logs`);
 
       <StatsGrid>
         <StatCard
-          color="linear-gradient(135deg, #10b981 0%, #059669 100%)"
-          initial={{ opacity: 0, y: 20 }}
+          color="var(--color-accent-green)"
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
@@ -1040,8 +1063,8 @@ Check console for detailed logs`);
         </StatCard>
 
         <StatCard
-          color="linear-gradient(135deg, #f59e0b 0%, #d97706 100%)"
-          initial={{ opacity: 0, y: 20 }}
+          color="var(--color-accent-cyan)"
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
@@ -1070,8 +1093,8 @@ Check console for detailed logs`);
         </StatCard>
 
         <StatCard
-          color="linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)"
-          initial={{ opacity: 0, y: 20 }}
+          color="var(--color-accent-green)"
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
         >
@@ -1091,8 +1114,8 @@ Check console for detailed logs`);
         </StatCard>
 
         <StatCard
-          color="linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)"
-          initial={{ opacity: 0, y: 20 }}
+          color="var(--color-accent-cyan)"
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
         >
@@ -1133,8 +1156,8 @@ Check console for detailed logs`);
         </StatCard>
 
         <StatCard
-          color="linear-gradient(135deg, #059669 0%, #047857 100%)"
-          initial={{ opacity: 0, y: 20 }}
+          color="var(--color-accent-green)"
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
         >
@@ -1147,7 +1170,7 @@ Check console for detailed logs`);
                 All completed orders × ₹37
               </StatTrend>
             </div>
-            <StatIcon color="#124D34">
+            <StatIcon color="var(--color-accent-green)">
               <FiDollarSign />
             </StatIcon>
           </StatHeader>

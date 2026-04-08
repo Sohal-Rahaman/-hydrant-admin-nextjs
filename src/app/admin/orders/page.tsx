@@ -12,6 +12,7 @@ import {
   FiChevronUp, FiChevronDown, FiBarChart2, FiRefreshCcw, FiCalendar
 } from 'react-icons/fi';
 import { subscribeToCollection, updateDocument, db } from '@/lib/firebase';
+import UserInsightDrawer from '@/components/UserInsightDrawer';
 import { normalizeOrderStatus } from '@/lib/orderStatus';
 import { collection, getDocs } from 'firebase/firestore';
 import { logActivity } from '@/lib/activityLogger';
@@ -92,15 +93,22 @@ const fadeUp = keyframes`from{opacity:0;transform:translateY(10px)}to{opacity:1;
 
 /* ── Styled Components ──────────────────────────────────────── */
 const Page = styled.div`
-  min-height:100vh; background:#0c0c0c; color:#f0f0f0;
-  font-family:'DM Sans',sans-serif; padding-bottom:120px;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Fira Sans', sans-serif;
+  padding-bottom: 120px;
 `;
 
 const TopBar = styled.div`
-  background:rgba(12,12,12,.96); backdrop-filter:blur(24px);
-  padding:12px 20px; border-bottom:1px solid #1e1e1e;
-  position:sticky; top:0; z-index:100;
-  @media(max-width:1024px){top:64px}
+  background: var(--color-background-secondary);
+  backdrop-filter: blur(24px);
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-border-primary);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  @media (max-width: 1024px) { top: 64px }
 `;
 const TopBarRow = styled.div`
   display:flex; align-items:center; justify-content:space-between; gap:12px;
@@ -110,44 +118,95 @@ const TitleGroup = styled.div`
   display:flex; align-items:center; gap:10px; flex-shrink:0;
   @media(max-width:768px){display:none}
 `;
-const PageTitle = styled.h1`font-size:17px;font-weight:900;color:#fff;margin:0;letter-spacing:-.3px`;
-const PageSub = styled.p`font-size:11px;color:#555;margin:0;font-weight:600`;
+const PageTitle = styled.h1`
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--foreground);
+  margin: 0;
+  letter-spacing: -0.3px;
+  font-family: 'Fira Code', monospace;
+  text-transform: uppercase;
+`;
+
+const PageSub = styled.p`
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  margin: 0;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
 
 const SearchRow = styled.div`
   display:flex; gap:8px; align-items:center; flex:1; min-width:0;
   @media(max-width:768px){flex:0 0 100%}
 `;
 const SearchBox = styled.div`
-  background:#181818; border:1px solid #2a2a2a; border-radius:12px;
-  display:flex; align-items:center; padding:0 14px; gap:8px; flex:1;
-  transition:border-color .2s;
-  &:focus-within{border-color:#10B981}
+  background: var(--color-background-tertiary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-technical);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 8px;
+  flex: 1;
+  transition: all 0.2s;
+  &:focus-within { border-color: var(--color-accent-cyan); box-shadow: 0 0 0 1px var(--color-accent-cyan); }
 `;
+
 const SearchInput = styled.input`
-  background:transparent; border:none; padding:11px 0; color:#f0f0f0;
-  outline:none; font-size:13px; font-family:'DM Sans',sans-serif; width:100%;
-  &::placeholder{color:#444}
+  background: transparent;
+  border: none;
+  padding: 10px 0;
+  color: var(--foreground);
+  outline: none;
+  font-size: 0.85rem;
+  font-family: 'Fira Code', monospace;
+  width: 100%;
+  &::placeholder { color: var(--color-text-tertiary); }
 `;
+
 const IconBtn = styled.button`
-  background:#181818; border:1px solid #2a2a2a; border-radius:12px;
-  color:#888; width:44px; height:44px; display:flex; align-items:center;
-  justify-content:center; cursor:pointer; flex-shrink:0; transition:all .2s;
-  &:hover{border-color:#10B981;color:#10B981}
+  background: var(--color-background-tertiary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-technical);
+  color: var(--color-text-secondary);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  &:hover { border-color: var(--color-accent-cyan); color: var(--color-accent-cyan); }
 `;
 
 const StatsTabs = styled.div`
-  display:flex; gap:10px; padding:12px 20px; overflow-x:auto; border-bottom:1px solid #1a1a1a;
-  &::-webkit-scrollbar{display:none}
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border-primary);
+  background: var(--background);
+  &::-webkit-scrollbar { display: none }
 `;
-const StatTab = styled.button<{$active:boolean;$clr:string}>`
-  display:flex; align-items:center; gap:12px; padding:10px 18px; border-radius:14px;
-  border:1px solid ${p=>p.$active?p.$clr:'#242424'};
-  background:${p=>p.$active?`${p.$clr}18`:'#161616'};
-  color:${p=>p.$active?p.$clr:'#666'}; cursor:pointer;
-  transition:all .2s; white-space:nowrap; flex-shrink:0;
-  &:hover{border-color:${p=>p.$clr};color:${p=>p.$clr}}
-  .num{font-size:22px;font-weight:900;line-height:1}
-  .lbl{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;opacity:.8}
+const StatTab = styled.button<{ $active: boolean; $clr: string }>`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-radius: var(--radius-technical);
+  border: 1px solid ${p => p.$active ? p.$clr : 'var(--color-border-primary)'};
+  background: ${p => p.$active ? `${p.$clr}15` : 'var(--color-background-secondary)'};
+  color: ${p => p.$active ? p.$clr : 'var(--color-text-secondary)'};
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  &:hover { border-color: ${p => p.$clr}; color: ${p => p.$clr}; }
+  .num { font-family: 'Fira Code', monospace; font-size: 1.2rem; font-weight: 700; line-height: 1; }
+  .lbl { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.8; }
 `;
 
 const FilterStrip = styled.div`
@@ -164,51 +223,97 @@ const FPill = styled.button<{$active:boolean}>`
 `;
 
 /* ── Card ── */
-const CardWrap = styled(motion.div)<{$delayed:boolean}>`
-  background:#181818; border-radius:18px; overflow:hidden;
-  border:1px solid ${p=>p.$delayed?'rgba(239,68,68,.35)':'#242424'};
-  position:relative; margin-bottom:10px; cursor:pointer;
-  transition:border-color .2s,transform .15s;
-  ${p=>p.$delayed&&css`animation:${pulseBorder} 2.5s ease-in-out infinite`}
-  &:hover{transform:translateY(-1px);border-color:#333}
+const CardWrap = styled(motion.div)<{ $delayed: boolean }>`
+  background: var(--color-background-secondary);
+  border-radius: var(--radius-technical);
+  overflow: hidden;
+  border: 1px solid ${p => p.$delayed ? 'rgba(239, 68, 68, 0.4)' : 'var(--color-border-primary)'};
+  position: relative;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  ${p => p.$delayed && css`animation: ${pulseBorder} 2s infinite`}
+  &:hover { border-color: var(--color-border-secondary); background: var(--color-background-tertiary); }
 `;
 const Accent = styled.div<{$clr:string}>`
   position:absolute; left:0; top:0; bottom:0; width:4px; background:${p=>p.$clr};
 `;
 const CardBody = styled.div`padding:14px 14px 14px 18px`;
 
-const Row = styled.div`display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px`;
-const CName = styled.div`font-size:15px;font-weight:800;color:#f0f0f0;letter-spacing:-.2px`;
+const Row = styled.div`display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px`;
+const CName = styled.div`font-size: 14px; font-weight: 700; color: var(--foreground); letter-spacing: -0.2px`;
 const AmtChip = styled.div`
-  font-size:16px;font-weight:900;color:#10B981;background:rgba(16,185,129,.1);
-  border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:3px 10px;white-space:nowrap;flex-shrink:0
+  font-family: 'Fira Code', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-accent-green);
+  background: rgba(163, 230, 53, 0.1);
+  border: 1px solid rgba(163, 230, 53, 0.2);
+  border-radius: var(--radius-technical);
+  padding: 2px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
 `;
 
 const MetaRow = styled.div`display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px`;
-const Chip = styled.div<{$v:'id'|'time'|'priority'|'delayed'|'partner'|'status'}>`
-  display:flex;align-items:center;gap:3px;font-size:10px;font-weight:700;border-radius:7px;padding:3px 8px;
-  ${p=>p.$v==='id'&&css`background:#111;color:#666;border:1px solid #2a2a2a;font-family:monospace`}
-  ${p=>p.$v==='time'&&css`color:#555;background:transparent;padding:0`}
-  ${p=>p.$v==='priority'&&css`background:rgba(249,115,22,.12);color:#F97316;border:1px solid rgba(249,115,22,.25)`}
-  ${p=>p.$v==='delayed'&&css`background:rgba(239,68,68,.12);color:#EF4444;border:1px solid rgba(239,68,68,.25)`}
-  ${p=>p.$v==='partner'&&css`background:rgba(59,130,246,.1);color:#3B82F6;border:1px solid rgba(59,130,246,.2)`}
-  ${p=>p.$v==='status'&&css`background:#1a1a1a;color:#888;border:1px solid #2a2a2a`}
+const Chip = styled.div<{ $v: 'id' | 'time' | 'priority' | 'delayed' | 'partner' | 'status' }>`
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: var(--radius-technical);
+  padding: 2px 6px;
+  font-family: 'Fira Code', monospace;
+  ${p => p.$v === 'id' && css`background: var(--color-background-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border-primary)`}
+  ${p => p.$v === 'time' && css`color: var(--color-text-tertiary); background: transparent; padding: 0`}
+  ${p => p.$v === 'priority' && css`background: rgba(0, 229, 255, 0.1); color: var(--color-accent-cyan); border: 1px solid rgba(0, 229, 255, 0.3)`}
+  ${p => p.$v === 'delayed' && css`background: rgba(239, 68, 68, 0.1); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.3)`}
+  ${p => p.$v === 'partner' && css`background: rgba(163, 230, 53, 0.1); color: var(--color-accent-green); border: 1px solid rgba(163, 230, 53, 0.3)`}
+  ${p => p.$v === 'status' && css`background: var(--color-background-tertiary); color: var(--color-text-tertiary); border: 1px solid var(--color-border-primary)`}
 `;
 
 const AddrBox = styled.div`
-  display:flex;align-items:flex-start;gap:6px;background:#111;border:1px solid #1e1e1e;
-  border-radius:10px;padding:8px 10px;margin-bottom:10px;font-size:12px;color:#888;line-height:1.4
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  background: var(--color-background-tertiary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-technical);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
 `;
+
 const AddrText = styled.div`
-  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 `;
-const FloorRow = styled.div`display:flex;gap:6px;margin-top:4px;font-size:10px;color:#555`;
+
+const FloorRow = styled.div`
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+`;
 
 const TagRow = styled.div`display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px`;
-const Tag = styled.div<{$clr?:string}>`
-  padding:3px 10px;border-radius:8px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;
-  background:${p=>p.$clr?`${p.$clr}15`:'#1a1a1a'};color:${p=>p.$clr||'#666'};
-  border:1px solid ${p=>p.$clr?`${p.$clr}28`:'#242424'}
+const Tag = styled.div<{ $clr?: string }>`
+  padding: 2px 8px;
+  border-radius: var(--radius-technical);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-family: 'Fira Code', monospace;
+  background: ${p => p.$clr ? `${p.$clr}15` : 'var(--color-background-tertiary)'};
+  color: ${p => p.$clr || 'var(--color-text-tertiary)'};
+  border: 1px solid ${p => p.$clr ? `${p.$clr}30` : 'var(--color-border-primary)'};
 `;
 
 const PBar = styled.div`height:3px;background:#1a1a1a;border-radius:2px;margin-bottom:10px;overflow:hidden`;
@@ -220,21 +325,41 @@ const ActGrid = styled.div`
   display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px;
   @media(max-width:400px){grid-template-columns:repeat(2,1fr)}
 `;
-const ABtn = styled.button<{$v?:'primary'|'danger'|'info'|'default'}>`
-  padding:10px 6px;border-radius:10px;font-size:11px;font-weight:700;
-  display:flex;align-items:center;justify-content:center;gap:4px;
-  cursor:pointer;min-height:44px;transition:all .15s;
-  ${p=>p.$v==='primary'&&css`background:#10B981;border:1px solid #10B981;color:#000;&:hover{background:#0ea877}`}
-  ${p=>p.$v==='danger'&&css`background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);color:#EF4444;&:hover{background:rgba(239,68,68,.15)}`}
-  ${p=>p.$v==='info'&&css`background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);color:#3B82F6;&:hover{background:rgba(59,130,246,.15)}`}
-  ${p=>(!p.$v||p.$v==='default')&&css`background:#1e1e1e;border:1px solid #2a2a2a;color:#ccc;&:hover{background:#262626}`}
+const ABtn = styled.button<{ $v?: 'primary' | 'danger' | 'info' | 'default' }>`
+  padding: 8px 6px;
+  border-radius: var(--radius-technical);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  min-height: 40px;
+  transition: all 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  ${p => p.$v === 'primary' && css`background: var(--color-accent-green); border: 1px solid var(--color-accent-green); color: #000; &:hover { filter: brightness(1.1) }`}
+  ${p => p.$v === 'danger' && css`background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #EF4444; &:hover { background: rgba(239, 68, 68, 0.2) }`}
+  ${p => p.$v === 'info' && css`background: rgba(0, 229, 255, 0.1); border: 1px solid rgba(0, 229, 255, 0.3); color: var(--color-accent-cyan); &:hover { background: rgba(0, 229, 255, 0.2) }`}
+  ${p => (!p.$v || p.$v === 'default') && css`background: var(--color-background-tertiary); border: 1px solid var(--color-border-primary); color: var(--color-text-secondary); &:hover { border-color: var(--color-border-secondary) }`}
 `;
 const PSel = styled.select`
-  width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2a2a2a;
-  background:#111;color:#999;font-size:12px;font-family:'DM Sans',sans-serif;
-  font-weight:600;cursor:pointer;outline:none;appearance:none;
-  &:focus{border-color:#10B981}&:hover{border-color:#333}
-  option{background:#111}
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-technical);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-background-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-family: 'Fira Sans', sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  &:focus { border-color: var(--color-accent-cyan) }
+  &:hover { border-color: var(--color-border-secondary) }
+  option { background: var(--color-background-tertiary) }
 `;
 
 /* ── Slot section headers ── */
@@ -260,10 +385,29 @@ const KanbanBoard = styled.div`
   @media(max-width:1023px){display:none}
 `;
 const Lane = styled.div`min-width:295px;max-width:295px;display:flex;flex-direction:column;gap:0`;
-const LaneHead = styled.div<{$clr:string}>`
-  display:flex;align-items:center;justify-content:space-between;padding:0 4px 12px;
-  .left{display:flex;align-items:center;gap:8px;.ic{color:${p=>p.$clr}}.title{font-size:14px;font-weight:800;color:${p=>p.$clr}}.sub{font-size:10px;color:#444;font-weight:600;display:block;margin-top:1px}}
-  .cnt{background:#1a1a1a;border:1px solid #242424;padding:3px 10px;border-radius:8px;font-size:12px;font-weight:800;color:#666}
+const LaneHead = styled.div<{ $clr: string }>`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 12px;
+  .left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    .ic { color: ${p => p.$clr } }
+    .title { font-family: 'Fira Code', monospace; font-size: 13px; font-weight: 700; color: ${p => p.$clr }; text-transform: uppercase; }
+    .sub { font-size: 9px; color: var(--color-text-tertiary); font-weight: 600; display: block; margin-top: 1px; text-transform: uppercase; }
+  }
+  .cnt { 
+    background: var(--color-background-tertiary); 
+    border: 1px solid var(--color-border-primary); 
+    padding: 2px 8px; 
+    border-radius: 4px; 
+    font-family: 'Fira Code', monospace;
+    font-size: 11px; 
+    font-weight: 700; 
+    color: var(--color-text-secondary); 
+  }
 `;
 
 /* ── Flat list (completed/cancelled) ── */
@@ -298,26 +442,67 @@ const ModalBg = styled(motion.div)`
   position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);
   z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px
 `;
-const ModalBox = styled(motion.div)`background:white;border-radius:20px;width:100%;max-width:600px;position:relative`;
-const MHead = styled.div`padding:28px 28px 18px;border-bottom:1px solid #f0f0f0`;
-const MTitle = styled.h2`color:#1e293b;margin:0;font-size:1.4rem;font-weight:800;display:flex;align-items:center;gap:10px`;
+const ModalBox = styled(motion.div)`
+  background: var(--color-background-secondary);
+  border-radius: var(--radius-technical);
+  border: 1px solid var(--color-border-primary);
+  width: 100%;
+  max-width: 600px;
+  position: relative;
+  color: var(--foreground);
+`;
+
+const MHead = styled.div`
+  padding: 24px 24px 16px;
+  border-bottom: 1px solid var(--color-border-primary);
+`;
+
+const MTitle = styled.h2`
+  color: var(--foreground);
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Fira Code', monospace;
+  text-transform: uppercase;
+`;
 const MClose = styled.button`
   position:absolute;top:18px;right:18px;background:none;border:none;
   font-size:1.4rem;color:#94a3b8;cursor:pointer;padding:6px;border-radius:8px;
   &:hover{background:#f1f5f9;color:#1e293b}
 `;
-const MBody = styled.div`padding:18px 28px 28px`;
+const MBody = styled.div`padding: 20px 24px 24px`;
+
 const TextArea = styled.textarea`
-  width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:8px;
-  font-size:.9rem;resize:vertical;min-height:80px;font-family:inherit;
-  &:focus{outline:none;border-color:#10B981;box-shadow:0 0 0 3px rgba(16,185,129,.1)}
+  width: 100%;
+  padding: 12px;
+  background: var(--color-background-tertiary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-technical);
+  font-size: 0.9rem;
+  color: var(--foreground);
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+  &:focus { outline: none; border-color: var(--color-accent-cyan); }
 `;
-const MActionBtn = styled.button<{$primary?:boolean}>`
-  padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9rem;
-  display:flex;align-items:center;gap:8px;
-  ${p=>p.$primary
-    ?'background:#10B981;border:none;color:#fff'
-    :'background:white;color:#374151;border:2px solid #e2e8f0'}
+
+const MActionBtn = styled.button<{ $primary?: boolean }>`
+  padding: 10px 20px;
+  border-radius: var(--radius-technical);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  ${p => p.$primary
+    ? 'background: var(--color-accent-green); border: none; color: #000;'
+    : 'background: var(--color-background-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border-primary);'}
 `;
 
 const SpinWrap = styled.div`
@@ -352,6 +537,8 @@ export default function OrdersPage() {
   const [bulkPartner, setBulkPartner] = useState('');
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedUserForDrawer, setSelectedUserForDrawer] = useState<any>(null);
+  const [isUserDrawerOpen, setIsUserDrawerOpen] = useState(false);
   const searchParams = useSearchParams();
   const orderIdParam = searchParams.get('orderId');
   const router = useRouter();
@@ -440,8 +627,8 @@ export default function OrdersPage() {
         setUsers(snap.docs.map(doc=>({
           id:doc.id,...doc.data(),
           phoneNumber:doc.data().phoneNumber||doc.data().phone||'',
-          wallet_balance:doc.data().wallet_balance||doc.data().walletBalance||0,
-          jars_occupied:doc.data().jars_occupied||doc.data().holdJars||doc.data().occupiedJars||0,
+          wallet_balance:doc.data().wallet_balance ?? doc.data().walletBalance ?? 0,
+          jars_occupied:doc.data().jars_occupied ?? doc.data().holdJars ?? doc.data().occupiedJars ?? 0,
         })) as User[]);
       } catch { setUsers([]); }
     }, [], ()=>setUsers([]));
@@ -1278,7 +1465,11 @@ export default function OrdersPage() {
                         style={{background:i%2===0?'#0c0c0c':'#101010',cursor:'pointer',transition:'background .1s'}}
                         onMouseEnter={e=>(e.currentTarget.style.background='#161616')}
                         onMouseLeave={e=>(e.currentTarget.style.background=i%2===0?'#0c0c0c':'#101010')}
-                        onClick={()=>router.push(`/admin/users?customerId=${o.userId}`)}
+                        onClick={(e)=>{
+                          e.stopPropagation();
+                          setSelectedUserForDrawer(u);
+                          setIsUserDrawerOpen(true);
+                        }}
                       >
                         <td style={{padding:'9px 10px',borderBottom:'1px solid #161616',color:'#444',fontSize:10}}>
                           {i+1}
@@ -1393,6 +1584,12 @@ export default function OrdersPage() {
           </ModalBg>
         )}
       </AnimatePresence>
+
+      <UserInsightDrawer 
+        isOpen={isUserDrawerOpen} 
+        onClose={() => setIsUserDrawerOpen(false)} 
+        user={selectedUserForDrawer} 
+      />
     </Page>
   );
 }

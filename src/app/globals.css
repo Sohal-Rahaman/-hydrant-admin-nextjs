@@ -1,67 +1,61 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #1a1a18;
+  /* Industrial Precision - Global Dark Mode as Default */
+  --background: #0A0A0A;
+  --foreground: #F8FAFC;
 
-  /* Hydrant 2.0 Design Tokens - High Contrast */
-  --color-background-primary: #ffffff;
-  --color-background-secondary: #f5f5f3;
-  --color-background-tertiary: #eeede8;
-  --color-background-info: #e6f1fb;
-  --color-background-success: #eaf3de;
-  --color-background-warning: #faeeda;
-  --color-background-danger: #fcebeb;
+  /* Surface Hierarchy */
+  --color-background-primary: #0A0A0A;
+  --color-background-secondary: #121212;
+  --color-background-tertiary: #1E1E1E;
+  
+  /* Signal Accents */
+  --color-accent-cyan: #00E5FF;
+  --color-accent-green: #A3E635;
+  
+  /* Functional States */
+  --color-background-info: rgba(0, 229, 255, 0.05);
+  --color-background-success: rgba(163, 230, 53, 0.05);
+  --color-background-warning: rgba(251, 191, 36, 0.05);
+  --color-background-danger: rgba(248, 113, 113, 0.05);
 
-  --color-text-primary: #1a1a18;
-  --color-text-secondary: #4a4a48;
-  --color-text-tertiary: #6a6a68;
-  --color-text-info: #185fa5;
-  --color-text-success: #3b6d11;
-  --color-text-warning: #854f0b;
-  --color-text-danger: #a32d2d;
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #94A3B8;
+  --color-text-tertiary: #64748B;
+  --color-text-info: #00E5FF;
+  --color-text-success: #A3E635;
+  --color-text-warning: #FBBF24;
+  --color-text-danger: #F87171;
 
-  --color-border-primary: rgba(0,0,0,0.1);
-  --color-border-secondary: rgba(0,0,0,0.18);
-  --color-border-tertiary: rgba(0,0,0,0.08); /* Faint lines for structure */
-  --color-border-info: #9ecae9;
-  --color-border-success: #c5dcac;
-  --color-border-danger: #f1babb;
+  /* Technical Borders */
+  --color-border-primary: #2A2A2A;
+  --color-border-secondary: #334155;
+  --color-border-tertiary: rgba(0, 229, 255, 0.1); 
+  
+  /* Precision Radius */
+  --radius-technical: 2px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #1e1e1c;
-    --foreground: #f5f5f3;
-
-    --color-background-primary: #1e1e1c;
-    --color-background-secondary: #2a2a28;
-    --color-background-tertiary: #333330;
-    --color-background-info: #1e293b;
-    --color-background-success: #14532d00; /* Subtle green overlay */
-    --color-background-warning: #451a0300;
-    --color-background-danger: #450a0a00;
-
-    --color-text-primary: #f5f5f3;
-    --color-text-secondary: #a1a1aa;
-    --color-text-tertiary: #71717a;
-    --color-text-info: #7dd3fc;
-    --color-text-success: #4ade80;
-    --color-text-warning: #fbbf24;
-    --color-text-danger: #f87171;
-
-    --color-border-primary: rgba(255,255,255,0.1);
-    --color-border-secondary: rgba(255,255,255,0.2);
-    --color-border-tertiary: rgba(255,255,255,0.08);
-    --color-border-info: #334155;
-    --color-border-success: #065f46;
-    --color-border-danger: #7f1d1d;
-  }
+/* Light mode fallback (only if explicitly requested via class) */
+.light {
+  --background: #FFFFFF;
+  --foreground: #1E293B;
+  --color-background-primary: #FFFFFF;
+  --color-background-secondary: #F8FAFC;
+  --color-background-tertiary: #F1F5F9;
+  --color-text-primary: #1E293B;
+  --color-text-secondary: #475569;
+  --color-border-primary: #E2E8F0;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-fira-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+.font-mono-technical {
+  font-family: var(--font-fira-code), monospace;
 }

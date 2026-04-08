@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { FiPhone, FiMessageCircle, FiBox, FiUsers, FiSearch, FiStar, FiClock, FiDollarSign, FiActivity, FiAlertCircle } from 'react-icons/fi';
 import { subscribeToCollection } from '@/lib/firebase';
-import UserInsightDrawer from './UserInsightDrawer';
+import UserInsightDrawer from '@/components/UserInsightDrawer';
 
 // Interfaces
 interface User {
@@ -74,7 +74,16 @@ export default function CRMScreen() {
 
   useEffect(() => {
     const unsubUsers = subscribeToCollection('users', (snapshot) => {
-      const formatted = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const formatted = snapshot.docs.map(doc => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          ...d,
+          phoneNumber: d.phoneNumber || d.phone || '',
+          wallet_balance: d.wallet_balance ?? d.walletBalance ?? 0,
+          jars_occupied: d.jars_occupied ?? d.jarHold ?? d.occupiedJars ?? 0,
+        };
+      });
       setUsers(formatted as User[]);
       if (orders.length > 0 || formatted.length > 0) setLoading(false);
     });
@@ -191,158 +200,145 @@ export default function CRMScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0E14] text-white p-6 max-w-7xl mx-auto flex flex-col gap-6">
+    <div className="min-h-screen bg-black text-white p-6 max-w-7xl mx-auto flex flex-col gap-8 font-sans">
       
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-teal-500">Hydrant Hub CRM</h1>
-          <p className="text-gray-400 text-sm mt-1">Predictive analytics and retention engine</p>
+          <h1 className="text-2xl font-bold font-mono tracking-tight text-white uppercase flex items-center gap-3">
+            <span className="w-2 h-8 bg-cyan-400"></span>
+            Hydrant Hub CRM
+          </h1>
+          <p className="text-gray-500 text-[10px] uppercase tracking-[0.2em] font-bold mt-2">Predictive Retention Engine v3.0</p>
         </div>
-        <div className="relative w-full md:w-80">
-          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <div className="relative w-full md:w-96">
+          <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-cyan-400" />
           <input
             type="text"
-            placeholder="Search name, phone, or ID..."
+            placeholder="SEARCH_QUERY: NAME | PHONE | ID"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-[#151f32] border border-emerald-500/10 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-emerald-500/50 transition-colors"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded px-5 py-3 pl-12 text-xs font-mono text-zinc-300 focus:outline-none focus:border-cyan-400/50 focus:ring-1 focus:ring-cyan-400/20 transition-all placeholder:text-zinc-700"
           />
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <motion.div whileHover={{ y: -2 }} className="bg-[#151f32] p-5 rounded-2xl border border-emerald-500/10 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center text-emerald-400 text-xl">
-             <FiDollarSign />
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-white">₹{metrics.totalCollection.toLocaleString()}</div>
-            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mt-1">Total LTV</div>
-          </div>
-        </motion.div>
-        <motion.div whileHover={{ y: -2 }} className="bg-[#151f32] p-5 rounded-2xl border border-emerald-500/10 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-yellow-500/20 to-orange-500/20 flex items-center justify-center text-yellow-400 text-xl">
-             <FiStar />
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-white">{metrics.vipCount}</div>
-            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mt-1">VIP Accounts</div>
-          </div>
-        </motion.div>
-        <motion.div whileHover={{ y: -2 }} className="bg-[#151f32] p-5 rounded-2xl border border-emerald-500/10 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500/20 to-red-500/20 flex items-center justify-center text-orange-400 text-xl">
-             <FiActivity />
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-white">{metrics.riskCount}</div>
-            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mt-1">At Risk Users</div>
-          </div>
-        </motion.div>
-        <motion.div whileHover={{ y: -2 }} className="bg-[#151f32] p-5 rounded-2xl border border-emerald-500/10 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-500/20 to-pink-500/20 flex items-center justify-center text-red-500 text-xl">
-             <FiAlertCircle />
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-white">{metrics.recoveryCount}</div>
-            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mt-1">Jar Recovery</div>
-          </div>
-        </motion.div>
+        {[
+          { label: 'Total LTV', value: `₹${metrics.totalCollection.toLocaleString()}`, icon: <FiDollarSign />, color: 'text-cyan-400', bg: 'bg-cyan-400/5' },
+          { label: 'VIP Accounts', value: metrics.vipCount, icon: <FiStar />, color: 'text-lime-400', bg: 'bg-lime-400/5' },
+          { label: 'At Risk', value: metrics.riskCount, icon: <FiActivity />, color: 'text-orange-400', bg: 'bg-orange-400/5' },
+          { label: 'Jar Recovery', value: metrics.recoveryCount, icon: <FiAlertCircle />, color: 'text-red-500', bg: 'bg-red-500/5' },
+        ].map((item, idx) => (
+          <motion.div 
+            key={idx}
+            whileHover={{ y: -2 }} 
+            className="bg-zinc-950 p-6 rounded border border-zinc-800 flex items-center gap-5 transition-all hover:border-zinc-700"
+          >
+            <div className={`w-12 h-12 rounded flex items-center justify-center text-xl ${item.bg} ${item.color} border border-current opacity-80`}>
+               {item.icon}
+            </div>
+            <div>
+              <div className="text-2xl font-bold font-mono text-white tracking-tighter">{item.value}</div>
+              <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-black mt-1 leading-none">{item.label}</div>
+            </div>
+          </motion.div>
+        ))}
       </div>
 
-      <div className="flex gap-2 p-1.5 bg-[#151f32] rounded-xl overflow-x-auto custom-scrollbar border border-white/5">
+      <div className="flex gap-1 p-1 bg-zinc-950 rounded border border-zinc-800 overflow-x-auto no-scrollbar">
         {[
-          { id: 'VIP', label: `VIP (${segmentation.VIP.length})`, icon: <FiStar/>, activeColor: 'bg-emerald-500/20 text-emerald-400' },
-          { id: 'AT_RISK', label: `At Risk (${segmentation.AT_RISK.length})`, icon: <FiActivity/>, activeColor: 'bg-orange-500/20 text-orange-400' },
-          { id: 'JAR_RECOVERY', label: `Jar Recovery (${segmentation.JAR_RECOVERY.length})`, icon: <FiAlertCircle/>, activeColor: 'bg-red-500/20 text-red-400' },
-          { id: 'HEALTHY', label: `Healthy (${segmentation.HEALTHY.length})`, icon: <FiUsers/>, activeColor: 'bg-blue-500/20 text-blue-400' },
-          { id: 'INACTIVE', label: `Inactive (${segmentation.INACTIVE.length})`, icon: <FiClock/>, activeColor: 'bg-gray-500/20 text-gray-400' },
+          { id: 'VIP', label: 'VIP', count: segmentation.VIP.length, icon: <FiStar/>, activeColor: 'bg-lime-400 text-black', dark: true },
+          { id: 'AT_RISK', label: 'RISK', count: segmentation.AT_RISK.length, icon: <FiActivity/>, activeColor: 'bg-orange-500 text-black', dark: true },
+          { id: 'JAR_RECOVERY', label: 'RECOVERY', count: segmentation.JAR_RECOVERY.length, icon: <FiAlertCircle/>, activeColor: 'bg-red-500 text-white', dark: true },
+          { id: 'HEALTHY', label: 'HEALTHY', count: segmentation.HEALTHY.length, icon: <FiUsers/>, activeColor: 'bg-cyan-400 text-black', dark: true },
+          { id: 'INACTIVE', label: 'INACTIVE', count: segmentation.INACTIVE.length, icon: <FiClock/>, activeColor: 'bg-zinc-700 text-white', dark: true },
         ].map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg whitespace-nowrap text-sm font-semibold transition-all ${activeTab === tab.id ? tab.activeColor : 'text-gray-400 hover:bg-white/5'}`}
+            className={`flex items-center gap-3 px-6 py-3 rounded text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === tab.id ? tab.activeColor : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900'}`}
           >
-            {tab.icon} {tab.label}
+            {tab.icon} {tab.label} <span className="opacity-50 font-mono">[{tab.count}]</span>
           </button>
         ))}
       </div>
 
-      <div className="bg-[#151f32] border border-white/5 rounded-2xl overflow-hidden flex-1">
+      <div className="bg-zinc-950 border border-zinc-800 rounded overflow-hidden flex-1 shadow-2xl">
         {loading ? (
-          <div className="p-12 text-center flex flex-col items-center">
-            <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" />
-            <div className="text-gray-400 text-sm">Loading CRM Data...</div>
+          <div className="p-20 text-center flex flex-col items-center">
+            <div className="w-6 h-6 border-[2px] border-cyan-400 border-t-transparent rounded-full animate-spin mb-6" />
+            <div className="text-zinc-600 text-[10px] uppercase font-black tracking-widest">Hydrating CRM Assets...</div>
           </div>
         ) : currentSegment.length === 0 ? (
-          <div className="p-16 text-center text-gray-500">
-            <FiUsers className="text-4xl mx-auto mb-4 opacity-50" />
-            <p>No users found in this segment</p>
+          <div className="p-20 text-center text-zinc-700">
+            <FiUsers className="text-5xl mx-auto mb-6 opacity-10" />
+            <p className="text-[10px] uppercase font-black tracking-widest">Zero signals detected in this cluster</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm whitespace-nowrap">
+            <table className="w-full text-left text-xs whitespace-nowrap">
               <thead>
-                <tr className="bg-white/[0.02] text-gray-400 border-b border-white/5">
-                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">Customer</th>
-                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">Orders</th>
-                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">LTV</th>
-                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">Jars</th>
-                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs">Last Order</th>
-                  <th className="px-6 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
+                <tr className="bg-zinc-900/50 text-zinc-500 border-b border-zinc-800">
+                  <th className="px-8 py-5 font-black uppercase tracking-widest text-[9px]">Entity / Identifier</th>
+                  <th className="px-8 py-5 font-black uppercase tracking-widest text-[9px]">Transactions</th>
+                  <th className="px-8 py-5 font-black uppercase tracking-widest text-[9px]">LTV Metrics</th>
+                  <th className="px-8 py-5 font-black uppercase tracking-widest text-[9px]">Asset Retention</th>
+                  <th className="px-8 py-5 font-black uppercase tracking-widest text-[9px]">Signal State</th>
+                  <th className="px-8 py-5 font-black uppercase tracking-widest text-[9px] text-right">Comms</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-zinc-900">
                 {currentSegment.map((user) => {
                   const name = user.full_name || user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
                   return (
                     <tr 
                       key={user.id} 
                       onClick={() => setSelectedUser(user)}
-                      className="border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer"
+                      className="group hover:bg-zinc-900 transition-colors cursor-pointer"
                     >
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold">
+                      <td className="px-8 py-5">
+                        <div className="flex items-center gap-5">
+                          <div className="w-10 h-10 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center text-cyan-400 font-bold text-base group-hover:border-cyan-400/50 transition-all">
                             {name.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <div className="font-semibold text-white">{name}</div>
-                            <div className="text-xs text-gray-500 font-mono mt-0.5">{user.customerId || user.id}</div>
+                            <div className="font-bold text-zinc-100 uppercase tracking-tight">{name}</div>
+                            <div className="text-[10px] text-zinc-600 font-mono mt-1 opacity-60 group-hover:opacity-100 transition-opacity">ID: {user.customerId || user.id}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className="bg-white/5 px-2.5 py-1 rounded-md text-gray-300 font-mono border border-white/5 text-xs">
-                          {user.__totalOrders || 0} dicts
+                      <td className="px-8 py-5">
+                        <span className="font-mono text-zinc-400">
+                          {user.__totalOrders || 0} ITEMS
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className="font-medium text-emerald-400">₹{user.__ltv?.toLocaleString() || 0}</span>
+                      <td className="px-8 py-5">
+                        <span className="font-mono font-bold text-lime-400 tracking-tighter text-sm">₹{user.__ltv?.toLocaleString() || 0}</span>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-1">
-                          <FiBox className="text-gray-500"/> 
-                          <span className={`${(user.jars_occupied || 0) > 0 ? 'text-orange-400 font-bold' : 'text-gray-400'}`}>
+                      <td className="px-8 py-5">
+                        <div className="flex items-center gap-3">
+                          <FiBox className="text-zinc-600"/> 
+                          <span className={`font-mono font-bold text-sm ${((user.jars_occupied || 0) > 0) ? 'text-orange-400' : 'text-zinc-700'}`}>
                             {user.jars_occupied || user.jarHold || 0}
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-gray-400">
-                        {formatDateSafe(user.lastOrderDate)}
+                      <td className="px-8 py-5 text-zinc-500 font-mono text-[10px]">
+                        Last Signal: {formatDateSafe(user.lastOrderDate)}
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-8 py-5 text-right">
                         <div className="flex justify-end gap-2">
                           <button 
                             onClick={(e) => handleWhatsApp(e, user)} 
-                            className="bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366]/20 p-2.5 rounded-lg border border-[#25D366]/20 transition-colors"
+                            className="bg-zinc-900 text-zinc-400 hover:text-lime-400 hover:bg-zinc-800 p-3 rounded transition-all border border-zinc-800 hover:border-lime-400/30"
                           >
-                            <FiMessageCircle />
+                            <FiMessageCircle size={14} />
                           </button>
                           <button 
                             onClick={(e) => handleCall(e, user)} 
-                            className="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 p-2.5 rounded-lg border border-blue-500/20 transition-colors"
+                            className="bg-zinc-900 text-zinc-400 hover:text-cyan-400 hover:bg-zinc-800 p-3 rounded transition-all border border-zinc-800 hover:border-cyan-400/30"
                           >
-                            <FiPhone />
+                            <FiPhone size={14} />
                           </button>
                         </div>
                       </td>

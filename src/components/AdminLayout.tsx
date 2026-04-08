@@ -38,13 +38,13 @@ import { useAuth } from '@/context/AuthContext';
 const LayoutContainer = styled.div`
   display: flex;
   height: 100vh;
-  background: #f8f9fa;
+  background: var(--background);
 `;
 
 const Sidebar = styled.div<{ $isOpen: boolean }>`
-  width: 280px;
-  background: #124D34;
-  color: white;
+  width: 260px;
+  background: var(--color-background-secondary);
+  color: var(--foreground);
   padding: 0;
   position: fixed;
   height: 100vh;
@@ -54,7 +54,7 @@ const Sidebar = styled.div<{ $isOpen: boolean }>`
   display: flex;
   flex-direction: column;
   transition: transform 0.3s ease;
-  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);
+  border-right: 1px solid var(--color-border-primary);
 
   @media (max-width: 1024px) {
     width: 100%;
@@ -67,8 +67,8 @@ const Sidebar = styled.div<{ $isOpen: boolean }>`
 `;
 
 const SidebarHeader = styled.div`
-  padding: 25px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 20px;
+  border-bottom: 1px solid var(--color-border-primary);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -90,10 +90,12 @@ const LogoImage = styled(Image)`
 `;
 
 const BrandText = styled.span`
-  font-size: 1.4rem;
-  font-weight: 900;
-  color: #A7F3D0;
+  font-family: 'Fira Code', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-accent-cyan);
   letter-spacing: -0.5px;
+  text-transform: uppercase;
 `;
 
 const CloseButton = styled.button`
@@ -132,33 +134,33 @@ const NavMenu = styled.nav`
 `;
 
 const NavItem = styled.button<{ $active?: boolean }>`
-  width: calc(100% - 30px);
-  margin: 4px 15px;
-  padding: 12px 20px;
+  width: 100%;
+  padding: 10px 20px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 15px;
-  font-size: 0.95rem;
+  gap: 12px;
+  font-size: 0.85rem;
   font-weight: 500;
-  transition: all 0.2s ease;
-  border-radius: 12px;
+  transition: all 0.15s ease;
   user-select: none;
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.7);
+  border-left: 2px solid transparent;
+  color: var(--color-text-secondary);
   text-align: left;
 
   &:hover {
-    background: rgba(167, 243, 208, 0.05);
-    color: white;
+    background: rgba(0, 229, 255, 0.05);
+    color: var(--color-accent-cyan);
+    border-left: 2px solid rgba(0, 229, 255, 0.3);
   }
   
   ${props => props.$active && `
-    background: #A7F3D0;
-    color: #124D34;
-    font-weight: 700;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    background: rgba(0, 229, 255, 0.08);
+    color: var(--color-accent-cyan);
+    font-weight: 600;
+    border-left: 2px solid var(--color-accent-cyan);
   `}
 
   svg {
@@ -173,8 +175,8 @@ const NavItem = styled.button<{ $active?: boolean }>`
 
 const UserInfo = styled.div`
   padding: 20px;
-  background: rgba(0, 0, 0, 0.2);
-  border-top: 1px solid rgba(167, 243, 208, 0.1);
+  background: var(--color-background-tertiary);
+  border-top: 1px solid var(--color-border-primary);
 `;
 
 const UserProfile = styled.div`
@@ -207,31 +209,31 @@ const UserRole = styled.div`
 
 const LogoutButton = styled.button`
   width: 100%;
-  background: rgba(167, 243, 208, 0.1);
-  border: 1px solid rgba(167, 243, 208, 0.2);
-  color: #A7F3D0;
-  padding: 12px;
-  border-radius: 12px;
+  background: rgba(248, 113, 113, 0.05);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  color: var(--color-text-danger);
+  padding: 10px;
+  border-radius: var(--radius-technical);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
 
   &:hover {
-    background: rgba(167, 243, 208, 0.2);
-    transform: translateY(-1px);
+    background: rgba(248, 113, 113, 0.1);
+    border-color: var(--color-text-danger);
   }
 `;
 
 const MainContent = styled.div`
   flex: 1;
-  margin-left: 280px;
+  margin-left: 260px;
   min-height: 100vh;
-  background: #f8f9fa;
+  background: var(--background);
   transition: margin-left 0.3s ease;
 
   @media (max-width: 1024px) {

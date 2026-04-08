@@ -1,91 +1,38 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { auth, getUserData, signInWithGoogle, signInWithEmail, logOut } from '@/lib/firebase';
-import { onAuthStateChanged, User, UserCredential } from 'firebase/auth';
-
-interface UserData {
-  id: string;
-  displayName?: string;
-  email?: string;
-  phoneNumber?: string;
-  photoURL?: string;
-  isAdmin?: boolean;
-  role?: 'superadmin' | 'admin' | 'manager' | 'support';
-  customerId?: string;
-  wallet_balance?: number;
-  jars_occupied?: number;
-  coins?: number;
-  createdAt?: Date | string;
-  updatedAt?: Date | string;
-}
+import { auth, logOut, SUPERADMIN_PHONES } from '@/lib/firebase';
+import { onAuthStateChanged, User, ConfirmationResult } from 'firebase/auth';
 
 interface AuthContextType {
   currentUser: User | null;
-  userData: UserData | null;
   isAdmin: boolean;
-  role: 'superadmin' | 'admin' | 'manager' | 'support' | null;
+  role: 'superadmin' | null;
   loading: boolean;
-  signIn: () => Promise<UserCredential>;
-  signInWithEmailPassword: (email: string, password: string) => Promise<UserCredential>;
   signOut: () => Promise<void>;
   checkAdminPrivileges: (user: User | null) => Promise<boolean>;
+  // Phone OTP state (managed here so AdminRoute stays clean)
+  confirmationResult: ConfirmationResult | null;
+  setConfirmationResult: (r: ConfirmationResult | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
 
-interface AuthProviderProps {
-  children: ReactNode;
-}
-
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [userData, setUserData] = useState<UserData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [role, setRole] = useState<AuthContextType['role']>(null);
+  const [loading, setLoading]         = useState(true);
+  const [isAdmin, setIsAdmin]         = useState(false);
+  const [role, setRole]               = useState<'superadmin' | null>(null);
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
-  // Sign in with Google
-  const signIn = async () => {
-    try {
-      const result = await signInWithGoogle();
-      return result;
-    } catch (error) {
-      console.error('Sign in error:', error);
-      throw error;
-    }
-  };
+  const signOut = async () => { await logOut(); };
 
-  // Sign in with email and password
-  const signInWithEmailPassword = async (email: string, password: string) => {
-    try {
-      const result = await signInWithEmail(email, password);
-      return result;
-    } catch (error) {
-      console.error('Email sign in error:', error);
-      throw error;
-    }
-  };
-
-  // Sign out
-  const signOut = async () => {
-    try {
-      await logOut();
-    } catch (error) {
-      console.error('Sign out error:', error);
-      throw error;
-    }
-  };
-
-  // Check admin privileges
   const checkAdminPrivileges = async (user: User | null): Promise<boolean> => {
     if (!user) {
       setIsAdmin(false);
@@ -93,60 +40,56 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return false;
     }
 
-    try {
-      const data = await getUserData(user.uid) as UserData | null;
-      if (data && data.isAdmin === true) {
-        setIsAdmin(true);
-        setRole(data.role || 'admin');
-        setUserData(data);
-        return true;
-      } else {
-        setIsAdmin(false);
-        setRole(null);
-        setUserData(data);
-        return false;
-      }
-    } catch (error) {
-      console.error('Error checking admin privileges:', error);
-      setIsAdmin(false);
-      return false;
+    // Normalize: strip all non-digits except +, then compare
+    const raw = user.phoneNumber || '';
+    const normalizedRaw = raw.replace(/[^\d+]/g, '');
+    const isSuperAdmin = SUPERADMIN_PHONES.some(p => p.replace(/[^\d+]/g, '') === normalizedRaw);
+
+    if (isSuperAdmin) {
+      setIsAdmin(true);
+      setRole('superadmin');
+      return true;
     }
+
+    setIsAdmin(false);
+    setRole(null);
+    return false;
   };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
-      
       if (user) {
         await checkAdminPrivileges(user);
       } else {
-        setUserData(null);
         setIsAdmin(false);
         setRole(null);
       }
-      
       setLoading(false);
     });
-
     return unsubscribe;
   }, []);
 
   const value: AuthContextType = {
     currentUser,
-    userData,
     isAdmin,
     role,
     loading,
-    signIn,
-    signInWithEmailPassword,
     signOut,
-    checkAdminPrivileges
+    checkAdminPrivileges,
+    confirmationResult,
+    setConfirmationResult,
   };
 
   return (
     <AuthContext.Provider value={value}>
       {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)', color: 'white', fontSize: '1.2rem' }}>
+        <div style={{
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          height: '100vh', background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+          color: 'white', fontSize: '1.2rem', gap: '12px',
+        }}>
+          <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>💧</span>
           Loading...
         </div>
       ) : (

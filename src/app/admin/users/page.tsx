@@ -5,11 +5,18 @@ import styled from 'styled-components';
 import {
   subscribeToCollection, updateDocument, addDocument, deleteDocument
 } from '@/lib/firebase';
-import { FiSearch, FiGift, FiCopy, FiPhoneCall, FiBell, FiSlash, FiChevronDown, FiChevronUp, FiCheck, FiPackage, FiMessageCircle, FiPlus, FiMinus, FiCheckCircle, FiXCircle, FiTrash2, FiEdit2, FiGrid } from 'react-icons/fi';
+import { 
+  FiSearch, FiGift, FiCopy, FiPhoneCall, FiBell, FiSlash, 
+  FiChevronDown, FiChevronUp, FiCheck, FiPackage, 
+  FiMessageCircle, FiPlus, FiMinus, FiCheckCircle, 
+  FiXCircle, FiTrash2, FiEdit2, FiGrid, FiDownload 
+} from 'react-icons/fi';
 import { where, serverTimestamp, writeBatch, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { mergeUserAccounts } from '@/lib/merge-utils';
+import * as XLSX from 'xlsx';
 
 // ─── Types ────────────────────────────────────────────────
 interface Address {
@@ -72,9 +79,11 @@ const fmt = (d?: { toDate(): Date } | Date | string | null) => {
 const dName = (u: User) => u.full_name || u.name || u.displayName || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Unknown';
 const initials = (n: string) => n.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
 const AVATAR_PALETTES = [
-  { bg: '#E6F1FB', tc: '#185FA5' }, { bg: '#E1F5EE', tc: '#0F6E56' },
-  { bg: '#FAEEDA', tc: '#854F0B' }, { bg: '#FBEAF0', tc: '#993556' },
-  { bg: '#EEEDFE', tc: '#3C3489' },
+  { bg: 'rgba(0, 229, 255, 0.1)', tc: 'var(--color-accent-cyan)' },
+  { bg: 'rgba(163, 230, 53, 0.1)', tc: 'var(--color-accent-green)' },
+  { bg: 'rgba(239, 68, 68, 0.1)', tc: '#EF4444' },
+  { bg: 'rgba(234, 179, 8, 0.1)', tc: '#EAB308' },
+  { bg: 'rgba(56, 189, 248, 0.1)', tc: '#38BDF8' },
 ];
 const palette = (id: string) => AVATAR_PALETTES[(id?.charCodeAt(0) ?? 0) % AVATAR_PALETTES.length];
 const statusBadge = (s: string) =>
@@ -88,36 +97,39 @@ const payBadge = (p?: string) =>
 // ─── Styled Components ────────────────────────────────────
 const Wrap = styled.div`
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 240px 1fr;
   height: calc(100vh - 40px);
-  border: 0.5px solid var(--color-border-tertiary);
-  border-radius: 14px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-technical);
   overflow: hidden;
-  background: var(--color-background-primary);
+  background: var(--background);
 `;
 const Sidebar = styled.div`
   background: var(--color-background-secondary);
-  border-right: 0.5px solid var(--color-border-tertiary);
+  border-right: 1px solid var(--color-border-primary);
   display: flex; flex-direction: column;
   min-height: 0;
 `;
 const SideHead = styled.div`
-  padding: 12px;
-  border-bottom: 0.5px solid var(--color-border-tertiary);
+  padding: 16px 12px;
+  border-bottom: 1px solid var(--color-border-primary);
 `;
 const SHeadLabel = styled.div`
-  font-size: 10px; color: var(--color-text-tertiary);
-  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px;
+  font-size: 9px; color: var(--color-text-tertiary);
+  text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px;
+  font-weight: 800;
 `;
-const Search = styled.div`
+const SearchBox = styled.div`
   position: relative;
-  svg { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--color-text-tertiary); font-size: 12px; }
+  svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--color-accent-cyan); font-size: 14px; }
 `;
 const SearchInput = styled.input`
-  width: 100%; padding: 6px 10px 6px 28px; font-size: 12px;
-  border: 0.5px solid var(--color-border-secondary); border-radius: 8px;
-  background: var(--color-background-primary); color: var(--color-text-primary);
-  &:focus { outline: none; border-color: var(--color-border-info); }
+  width: 100%; padding: 8px 12px 8px 34px; font-size: 11px;
+  border: 1px solid var(--color-border-primary); border-radius: var(--radius-technical);
+  background: var(--color-background-tertiary); color: var(--foreground);
+  font-family: 'Fira Code', monospace;
+  &:focus { outline: none; border-color: var(--color-accent-cyan); box-shadow: 0 0 0 1px var(--color-accent-cyan); }
+  &::placeholder { color: var(--color-text-tertiary); }
 `;
 const UserList = styled.div`
   flex: 1; 
@@ -130,60 +142,67 @@ const UserList = styled.div`
   &:hover::-webkit-scrollbar-thumb { background: #cbd5e1; }
 `;
 const UserRow = styled.div<{ $active?: boolean }>`
-  padding: 9px 12px; cursor: pointer;
-  border-bottom: 0.5px solid var(--color-border-tertiary);
-  display: flex; align-items: center; gap: 8px;
-  background: ${p => p.$active ? 'var(--color-background-info)' : 'transparent'};
-  &:hover { background: ${p => p.$active ? 'var(--color-background-info)' : 'var(--color-background-primary)'}; }
+  padding: 12px; cursor: pointer;
+  border-bottom: 1px solid var(--color-border-primary);
+  display: flex; align-items: center; gap: 10px;
+  background: ${p => p.$active ? 'rgba(0, 229, 255, 0.05)' : 'transparent'};
+  border-left: 2px solid ${p => p.$active ? 'var(--color-accent-cyan)' : 'transparent'};
+  &:hover { background: var(--color-background-tertiary); }
+  transition: all 0.15s;
 `;
 const Avatar = styled.div<{ $bg: string; $tc: string; $size?: number }>`
-  width: ${p => p.$size ?? 30}px; height: ${p => p.$size ?? 30}px;
-  border-radius: 50%; background: ${p => p.$bg}; color: ${p => p.$tc};
+  width: ${p => p.$size ?? 32}px; height: ${p => p.$size ?? 32}px;
+  border-radius: var(--radius-technical); background: ${p => p.$bg}; color: ${p => p.$tc};
   display: flex; align-items: center; justify-content: center;
-  font-size: ${p => (p.$size ?? 30) < 36 ? 11 : 14}px;
-  font-weight: 600; flex-shrink: 0;
+  font-size: ${p => (p.$size ?? 32) < 36 ? 10 : 13}px;
+  font-weight: 800; flex-shrink: 0; border: 1px solid ${p => p.$tc}40;
 `;
 const UName = styled.div<{ $active?: boolean }>`
-  font-size: 12px; font-weight: 500;
-  color: ${p => p.$active ? 'var(--color-text-info)' : 'var(--color-text-primary)'};
+  font-size: 12px; font-weight: 700;
+  color: ${p => p.$active ? 'var(--color-accent-cyan)' : 'var(--foreground)'};
+  text-transform: uppercase; letter-spacing: -0.2px;
 `;
-const UID = styled.div`font-size: 10px; color: var(--color-text-tertiary);`;
-const Main = styled.div`display: flex; flex-direction: column; overflow: hidden; min-width: 0;`;
+const UID = styled.div`font-size: 9px; color: var(--color-text-tertiary); font-family: 'Fira Code', monospace;`;
+const Main = styled.div`display: flex; flex-direction: column; overflow: hidden; min-width: 0; background: var(--background);`;
 const MainHead = styled.div`
-  padding: 12px 16px; border-bottom: 0.5px solid var(--color-border-tertiary);
+  padding: 16px 20px; border-bottom: 1px solid var(--color-border-primary);
   display: flex; align-items: center; justify-content: space-between;
-  flex-shrink: 0;
+  flex-shrink: 0; background: var(--color-background-secondary);
 `;
 const Badge = styled.span<{ $variant: string }>`
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 9px; border-radius: 20px; font-size: 10px; font-weight: 500;
-  ${p => p.$variant === 'success' && 'background:var(--color-background-success);color:var(--color-text-success);'}
-  ${p => p.$variant === 'warning' && 'background:var(--color-background-warning);color:var(--color-text-warning);'}
-  ${p => p.$variant === 'danger'  && 'background:var(--color-background-danger);color:var(--color-text-danger);'}
-  ${p => p.$variant === 'info'    && 'background:var(--color-background-info);color:var(--color-text-info);'}
+  padding: 4px 10px; border-radius: var(--radius-technical); font-size: 9px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  ${p => p.$variant === 'success' && 'background:rgba(163, 230, 53, 0.1); color:var(--color-accent-green); border: 1px solid rgba(163, 230, 53, 0.3);'}
+  ${p => p.$variant === 'warning' && 'background:rgba(234, 179, 8, 0.1); color:#EAB308; border: 1px solid rgba(234, 179, 8, 0.3);'}
+  ${p => p.$variant === 'danger'  && 'background:rgba(239, 68, 68, 0.1); color:#EF4444; border: 1px solid rgba(239, 68, 68, 0.3);'}
+  ${p => p.$variant === 'info'    && 'background:rgba(0, 229, 255, 0.1); color:var(--color-accent-cyan); border: 1px solid rgba(0, 229, 255, 0.3);'}
 `;
 const BtnXS = styled.button<{ $variant?: string }>`
-  padding: 5px 12px; font-size: 11px; border-radius: 6px; cursor: pointer; font-weight: 500;
-  border: 1px solid ${p => p.$variant === 'danger' ? 'var(--color-text-danger)' : p.$variant === 'info' ? 'var(--color-text-info)' : 'var(--color-border-secondary)'};
-  background: ${p => p.$variant === 'info' ? 'var(--color-background-info)' : p.$variant === 'danger' ? 'var(--color-background-danger)' : 'var(--color-background-primary)'};
-  color: ${p => p.$variant === 'danger' ? 'var(--color-text-danger)' : p.$variant === 'info' ? 'var(--color-text-info)' : 'var(--color-text-primary)'};
+  padding: 6px 12px; font-size: 10px; border-radius: var(--radius-technical); cursor: pointer; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  border: 1px solid ${p => p.$variant === 'danger' ? '#EF4444' : p.$variant === 'info' ? 'var(--color-accent-cyan)' : 'var(--color-border-primary)'};
+  background: ${p => p.$variant === 'info' ? 'rgba(0, 229, 255, 0.1)' : p.$variant === 'danger' ? 'rgba(239, 68, 68, 0.1)' : 'var(--color-background-tertiary)'};
+  color: ${p => p.$variant === 'danger' ? '#EF4444' : p.$variant === 'info' ? 'var(--color-accent-cyan)' : 'var(--color-text-secondary)'};
   display: flex; align-items: center; gap: 5px;
   transition: all 0.2s;
-  &:hover { background: ${p => p.$variant === 'info' ? '#d0e5f9' : p.$variant === 'danger' ? '#fadedd' : 'var(--color-background-secondary)'}; }
+  &:hover { filter: brightness(1.2); border-color: currentColor; }
 `;
 const TabBar = styled.div`
-  display: flex; border-bottom: 0.5px solid var(--color-border-tertiary);
-  padding: 0 16px; flex-shrink: 0; overflow-x: auto;
+  display: flex; border-bottom: 1px solid var(--color-border-primary);
+  padding: 0 20px; flex-shrink: 0; overflow-x: auto;
   &::-webkit-scrollbar { display: none; }
+  background: var(--color-background-secondary);
 `;
 const Tab = styled.button<{ $active?: boolean }>`
-  padding: 10px 16px; font-size: 12px; cursor: pointer; font-weight: 600;
-  color: ${p => p.$active ? 'var(--color-text-info)' : 'var(--color-text-tertiary)'};
+  padding: 12px 20px; font-size: 11px; cursor: pointer; font-weight: 800;
+  color: ${p => p.$active ? 'var(--color-accent-cyan)' : 'var(--color-text-tertiary)'};
   border: none; background: none; white-space: nowrap;
-  border-bottom: 2.5px solid ${p => p.$active ? 'var(--color-text-info)' : 'transparent'};
-  margin-bottom: -0.5px;
+  border-bottom: 2px solid ${p => p.$active ? 'var(--color-accent-cyan)' : 'transparent'};
+  margin-bottom: -1px;
+  text-transform: uppercase; letter-spacing: 0.1em;
   transition: all 0.2s;
-  &:hover { color: var(--color-text-primary); background: var(--color-background-secondary); }
+  &:hover { color: var(--foreground); }
 `;
 const TabBody = styled.div`padding: 14px 16px; overflow-y: auto; flex: 1;`;
 const Metrics = styled.div<{ $cols?: number }>`
@@ -192,27 +211,29 @@ const Metrics = styled.div<{ $cols?: number }>`
   gap: 8px; margin-bottom: 14px;
 `;
 const Metric = styled.div`
-  background: var(--color-background-secondary);
-  border-radius: 8px;
-  padding: 8px 12px;
+  background: var(--color-background-tertiary);
+  border-radius: var(--radius-technical);
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  border: 0.5px solid var(--color-border-tertiary);
+  gap: 4px;
+  border: 1px solid var(--color-border-primary);
 `;
 
 const ML = styled.div<{ $color?: string }>`
   font-size: 9px;
-  font-weight: 600;
+  font-weight: 800;
   color: ${p => p.$color || 'var(--color-text-tertiary)'};
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.1em;
 `;
 
 const MV = styled.div<{ $color?: string }>`
-  font-size: 16px;
-  font-weight: 700;
-  color: ${p => p.$color || 'var(--color-text-primary)'};
+  font-size: 1.25rem;
+  font-weight: 800;
+  font-family: 'Fira Code', monospace;
+  color: ${p => p.$color || 'var(--foreground)'};
+  letter-spacing: -1px;
 `;
 
 const MSub = styled.div`font-size: 10px; color: var(--color-text-tertiary); margin-top: 1px;`;
@@ -220,15 +241,17 @@ const SectionTitle = styled.div`
   font-size: 11px; font-weight: 500; color: var(--color-text-secondary);
   text-transform: uppercase; letter-spacing: .05em; margin: 14px 0 8px;
 `;
-const Table = styled.table`width: 100%; border-collapse: collapse; font-size: 12px;`;
+const Table = styled.table`width: 100%; border-collapse: collapse; font-size: 11px;`;
 const Th = styled.th`
-  text-align: left; padding: 6px 10px; font-size: 10px; font-weight: 500;
-  color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: .04em;
-  border-bottom: 0.5px solid var(--color-border-tertiary); white-space: nowrap;
+  text-align: left; padding: 10px 12px; font-size: 9px; font-weight: 800;
+  color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.1em;
+  border-bottom: 1px solid var(--color-border-primary); white-space: nowrap;
+  background: var(--color-background-secondary);
 `;
 const Td = styled.td`
-  padding: 8px 10px; border-bottom: 0.5px solid var(--color-border-tertiary);
-  color: var(--color-text-primary); vertical-align: middle;
+  padding: 12px; border-bottom: 1px solid var(--color-border-primary);
+  color: var(--foreground); vertical-align: middle;
+  font-family: 'Fira Sans', sans-serif;
 `;
 const FilterBar = styled.div`display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;`;
 const FSel = styled.select`
@@ -331,17 +354,17 @@ const ScrollToTop = styled.button<{ $show: boolean }>`
 `;
 
 const ModalBackdrop = styled.div`
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.4);
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8);
   z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(8px);
 `;
 const ModalContainer = styled.div`
-  background: var(--color-background-primary); border-radius: 16px; width: 100%; max-width: 440px; 
-  position: relative; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden;
-  border: 1px solid var(--color-border);
+  background: var(--color-background-secondary); border-radius: var(--radius-technical); width: 100%; max-width: 480px; 
+  position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.5); overflow: hidden;
+  border: 1px solid var(--color-border-primary);
 `;
-const ModalHead = styled.div`padding: 16px 20px; border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center; background: var(--color-background-secondary);`;
-const ModalTitle = styled.div`font-size: 14px; font-weight: 600; color: var(--color-text-primary);`;
+const ModalHead = styled.div`padding: 20px 24px; border-bottom: 1px solid var(--color-border-primary); display: flex; justify-content: space-between; align-items: center; background: var(--color-background-tertiary);`;
+const ModalTitle = styled.div`font-size: 13px; font-weight: 800; color: var(--foreground); text-transform: uppercase; letter-spacing: 0.1em; font-family: 'Fira Code', monospace;`;
 const CloseBtn = styled.button`background: none; border: none; font-size: 20px; color: var(--color-text-tertiary); cursor: pointer; &:hover { color: var(--color-text-primary); }`;
 const ModalBody = styled.div`padding: 20px;`;
 
@@ -487,6 +510,13 @@ export default function UsersPage() {
   // jar
   const [jarCount, setJarCount] = useState('');
   const [jarReason, setJarReason] = useState('');
+
+  // maintenance & cleanup
+  const [matchingGroups, setMatchingGroups] = useState<User[][]>([]);
+  const [inactiveUsers, setInactiveUsers] = useState<User[]>([]);
+  const [maintenanceTab, setMaintenanceTab] = useState<'merge' | 'cleanup'>('merge');
+  const [isMaintenanceModalOpen, setIsMaintenanceModalOpen] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
 
   // per-user caches
   const [userOrders, setUserOrders] = useState<Order[]>([]);
@@ -1504,6 +1534,245 @@ export default function UsersPage() {
     );
   };
 
+  const openMaintenanceModal = () => {
+    findDuplicates();
+    findInactiveUsers();
+    setIsMaintenanceModalOpen(true);
+  };
+
+  const findDuplicates = () => {
+    const groups: Record<string, User[]> = {};
+    users.forEach(u => {
+      const p = (u.phone || u.phoneNumber || '').replace(/\D/g, '');
+      const e = (u.email || '').toLowerCase().trim();
+      if (p && p.length >= 10) {
+        if (!groups[`p:${p}`]) groups[`p:${p}`] = [];
+        groups[`p:${p}`].push(u);
+      }
+      if (e && e.includes('@')) {
+        if (!groups[`e:${e}`]) groups[`e:${e}`] = [];
+        groups[`e:${e}`].push(u);
+      }
+    });
+
+    const dupGroups = Object.values(groups)
+      .filter(g => g.length > 1)
+      .map(g => {
+        // Remove duplicates within the group (same user ID)
+        const unique = Array.from(new Map(g.map(u => [u.id, u])).values());
+        return unique;
+      })
+      .filter(g => g.length > 1);
+
+    setMatchingGroups(dupGroups);
+  };
+
+  const findInactiveUsers = () => {
+    const now = new Date().getTime();
+    const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+    
+    const inactive = users.filter(u => {
+      // 1. Safety Guard: If jarHold/jars_occupied > 0, NEVER delete.
+      const jars = (u.jars_occupied || 0) + (u.jarHold || 0);
+      if (jars > 0) return false;
+
+      // 2. Inactivity Check
+      const getTs = (d?: { toDate(): Date } | Date | string) => {
+        if (!d) return 0;
+        if (typeof (d as any).toMillis === 'function') return (d as any).toMillis();
+        return new Date(d as any).getTime();
+      };
+
+      const lastActive = getTs(u.lastOrderDate) || getTs(u.createdAt);
+      if (!lastActive) return false;
+
+      return (now - lastActive) > ninetyDaysMs;
+    });
+
+    setInactiveUsers(inactive);
+  };
+
+  const deleteInactiveBatch = async () => {
+    if (inactiveUsers.length === 0) return;
+    if (!confirm(`Are you sure you want to PERMANENTLY delete ${inactiveUsers.length} inactive users? History will be preserved but profiles will be lost.`)) return;
+
+    setIsMerging(true);
+    try {
+      const batch = writeBatch(db);
+      inactiveUsers.forEach(u => {
+        batch.delete(doc(db, 'users', u.id));
+      });
+      await batch.commit();
+      showToast(`Deleted ${inactiveUsers.length} inactive accounts`);
+      setIsMaintenanceModalOpen(false);
+    } catch (err) {
+      console.error(err);
+      showToast('Batch delete failed');
+    }
+    setIsMerging(false);
+  };
+
+  const executeMergeGroup = async (group: User[]) => {
+    if (group.length < 2) return;
+    setIsMerging(true);
+    try {
+      const sorted = [...group].sort((a, b) => {
+        const getTs = (u: User) => {
+          const c = u.createdAt as any;
+          if (!c) return 0;
+          if (typeof c.toMillis === 'function') return c.toMillis();
+          return new Date(c).getTime();
+        };
+        return getTs(b) - getTs(a);
+      });
+
+      const target = sorted[0];
+      const sources = sorted.slice(1).map(u => u.id);
+
+      await mergeUserAccounts(target.id, sources);
+      showToast(`Merged ${sources.length} accounts into ${target.customerId}`);
+      
+      // Update modal data
+      findDuplicates();
+      findInactiveUsers();
+    } catch (err) {
+      console.error(err);
+      showToast('Merge failed');
+    }
+    setIsMerging(false);
+  };
+
+  const renderMaintenanceModal = () => {
+    if (!isMaintenanceModalOpen) return null;
+    return (
+      <ModalBackdrop onClick={() => setIsMaintenanceModalOpen(false)}>
+        <ModalContainer onClick={e => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+          <ModalHead>
+            <ModalTitle>Account Maintenance & Cleanup</ModalTitle>
+            <CloseBtn onClick={() => setIsMaintenanceModalOpen(false)}>&times;</CloseBtn>
+          </ModalHead>
+          
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border-primary)', background: 'var(--color-background-secondary)' }}>
+            <button 
+              onClick={() => setMaintenanceTab('merge')}
+              style={{ flex: 1, padding: '12px', border: 'none', background: maintenanceTab === 'merge' ? 'var(--color-background-tertiary)' : 'transparent', color: maintenanceTab === 'merge' ? 'var(--color-accent-cyan)' : 'var(--color-text-tertiary)', fontWeight: 700, cursor: 'pointer', borderBottom: maintenanceTab === 'merge' ? '2px solid var(--color-accent-cyan)' : 'none' }}>
+              Duplicates ({matchingGroups.length})
+            </button>
+            <button 
+              onClick={() => setMaintenanceTab('cleanup')}
+              style={{ flex: 1, padding: '12px', border: 'none', background: maintenanceTab === 'cleanup' ? 'var(--color-background-tertiary)' : 'transparent', color: maintenanceTab === 'cleanup' ? 'var(--color-accent-cyan)' : 'var(--color-text-tertiary)', fontWeight: 700, cursor: 'pointer', borderBottom: maintenanceTab === 'cleanup' ? '2px solid var(--color-accent-cyan)' : 'none' }}>
+              Inactive (90D+) ({inactiveUsers.length})
+            </button>
+          </div>
+
+          <ModalBody style={{ overflowY: 'auto' }}>
+            {maintenanceTab === 'merge' ? (
+              <>
+                <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 16 }}>
+                  Identify and merge accounts sharing the same phone or email.
+                </p>
+                {matchingGroups.length === 0 ? (
+                  <EmptyState style={{ padding: '20px 0' }}>No duplicates detected.</EmptyState>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                    {matchingGroups.map((group, idx) => {
+                      const sorted = [...group].sort((a, b) => {
+                        const getTs = (u: User) => {
+                          const c = u.createdAt as any;
+                          if (!c) return 0;
+                          if (typeof c.toMillis === 'function') return c.toMillis();
+                          return new Date(c).getTime();
+                        };
+                        return getTs(b) - getTs(a);
+                      });
+                      const target = sorted[0];
+                      const others = sorted.slice(1);
+                      const p = palette(target.customerId || target.id);
+
+                      return (
+                        <div key={idx} style={{ background: 'var(--color-background-tertiary)', borderRadius: 12, padding: 16, border: '1px solid var(--color-border-primary)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                            <div>
+                              <Badge $variant="success">Keep Primary</Badge>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                                <Avatar $bg={p.bg} $tc={p.tc} $size={32}>{initials(dName(target))}</Avatar>
+                                <div>
+                                  <div style={{ fontWeight: 800, fontSize: 13 }}>{dName(target)}</div>
+                                  <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', fontFamily: 'monospace' }}>{target.customerId} · {target.phone || target.phoneNumber}</div>
+                                </div>
+                              </div>
+                            </div>
+                            <BtnPrimary onClick={() => executeMergeGroup(group)} disabled={isMerging} style={{ fontSize: 10, padding: '6px 14px' }}>
+                              {isMerging ? 'Merging...' : `Merge ${others.length}`}
+                            </BtnPrimary>
+                          </div>
+
+                          <div style={{ borderTop: '1px solid var(--color-border-primary)', paddingTop: 12 }}>
+                            <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Accounts to be merged:</div>
+                            {others.map(o => (
+                              <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, opacity: 0.6 }}>
+                                <FiTrash2 size={10} color="#ef4444" />
+                                <span style={{ fontSize: 11 }}>{o.customerId} ({dName(o)})</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: 0 }}>
+                    Accounts with no orders for <strong>90 days</strong> and <strong>0 jars held</strong>.
+                  </p>
+                  {inactiveUsers.length > 0 && (
+                    <BtnPrimary onClick={deleteInactiveBatch} disabled={isMerging} style={{ background: '#ef4444', borderColor: '#ef4444', fontSize: 10 }}>
+                      Delete All {inactiveUsers.length} Inactive
+                    </BtnPrimary>
+                  )}
+                </div>
+
+                {inactiveUsers.length === 0 ? (
+                  <EmptyState style={{ padding: '20px 0' }}>All accounts appear active or hold property.</EmptyState>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {inactiveUsers.map(u => {
+                      const p = palette(u.customerId || u.id);
+                      return (
+                        <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-background-tertiary)', borderRadius: 8, padding: '8px 12px', border: '1px solid var(--color-border-primary)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <Avatar $bg={p.bg} $tc={p.tc} $size={24} style={{ fontSize: 10 }}>{initials(dName(u))}</Avatar>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: 12 }}>{dName(u)}</div>
+                              <div style={{ fontSize: 9, color: 'var(--color-text-tertiary)' }}>{u.customerId} · Last: {u.lastOrderDate ? fmt(u.lastOrderDate) : 'Never'}</div>
+                            </div>
+                          </div>
+                          <FiTrash2 size={12} color="#ef4444" style={{ cursor: 'pointer' }} onClick={() => {
+                            if (confirm(`Delete ${u.customerId}?`)) {
+                              deleteDocument('users', u.id);
+                              showToast('User deleted');
+                              findInactiveUsers();
+                            }
+                          }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </ModalBody>
+          <div style={{ padding: 16, borderTop: '1px solid var(--color-border-primary)', textAlign: 'right' }}>
+            <BtnSec onClick={() => setIsMaintenanceModalOpen(false)}>Close</BtnSec>
+          </div>
+        </ModalContainer>
+      </ModalBackdrop>
+    );
+  };
+
   const tabContent: Record<TabId, React.ReactNode> = {
     overview:     renderOverview(),
     profile:      renderProfile(),
@@ -1519,17 +1788,97 @@ export default function UsersPage() {
     return 'warning';
   };
 
+  const handleExportToExcel = () => {
+    if (users.length === 0) {
+      showToast('No customer data to export');
+      return;
+    }
+
+    try {
+      // Flatten the data for Excel
+      const dataToExport = users.map(u => ({
+        'Customer ID': u.customerId || u.id,
+        'Full Name': dName(u),
+        'Email': u.email || '—',
+        'Phone': u.phoneNumber || u.phone || '—',
+        'Alt Phone': u.alt_phone || '—',
+        'Wallet Balance (₹)': u.wallet_balance ?? 0,
+        'Jars Occupied': u.jars_occupied ?? 0,
+        'Jar Hold': u.jarHold ?? 0,
+        'Referral Count': u.referralCount ?? 0,
+        'Bonus Earned (₹)': u.bonusEarned ?? 0,
+        'Status': u.status || (u.isActive ? 'Active' : 'Inactive'),
+        'Role': u.role || 'User',
+        'Last Order Date': u.lastOrderDate ? fmt(u.lastOrderDate) : 'Never',
+        'Registration Date': u.createdAt ? fmt(u.createdAt) : '—',
+      }));
+
+      // Create Worksheet
+      const ws = XLSX.utils.json_to_sheet(dataToExport);
+      
+      // Auto-size columns (rough approximation)
+      const colWidths = [
+        { wch: 15 }, // Customer ID
+        { wch: 25 }, // Full Name
+        { wch: 30 }, // Email
+        { wch: 15 }, // Phone
+        { wch: 15 }, // Alt Phone
+        { wch: 20 }, // Wallet Balance
+        { wch: 15 }, // Jars Occupied
+        { wch: 10 }, // Jar Hold
+        { wch: 15 }, // Referral Count
+        { wch: 15 }, // Bonus Earned
+        { wch: 10 }, // Status
+        { wch: 10 }, // Role
+        { wch: 15 }, // Last Order
+        { wch: 15 }, // Reg Date
+      ];
+      ws['!cols'] = colWidths;
+
+      // Create Workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Customers');
+
+      // Generate Filename with date
+      const dateStr = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(wb, `Hydrant_Customers_${dateStr}.xlsx`);
+      
+      showToast('Excel export complete');
+    } catch (err) {
+      console.error('Export failed:', err);
+      showToast('Excel export failed');
+    }
+  };
+
   return (
     <>
       <Wrap>
         {/* ── Sidebar ── */}
         <Sidebar>
           <SideHead>
-            <SHeadLabel>Customers</SHeadLabel>
-            <Search>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <SHeadLabel style={{ margin: 0 }}>Customers ({filteredUsers.length})</SHeadLabel>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button 
+                  onClick={handleExportToExcel}
+                  title="Download all customer data as Excel"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-accent-cyan)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 800, textTransform: 'uppercase' }}
+                >
+                  <FiDownload /> Export
+                </button>
+                <button 
+                  onClick={openMaintenanceModal}
+                  title="Account maintenance and cleanup"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-accent-cyan)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 800, textTransform: 'uppercase' }}
+                >
+                  <FiGrid /> Maintenance
+                </button>
+              </div>
+            </div>
+            <SearchBox>
               <FiSearch />
-              <SearchInput placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
-            </Search>
+              <SearchInput placeholder="SEARCH_DATABASE..." value={search} onChange={e => setSearch(e.target.value)} />
+            </SearchBox>
           </SideHead>
           <UserList>
             {filteredUsers.map(u => {
@@ -1574,9 +1923,9 @@ export default function UsersPage() {
                     {initials(dName(selected))}
                   </Avatar>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{dName(selected)}</div>
-                    <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
-                      {selected.customerId} · Joined {fmt(selected.createdAt)}
+                    <div style={{ fontSize: 16, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.5px' }}>{dName(selected)}</div>
+                    <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', fontFamily: 'Fira Code, monospace', marginTop: 4 }}>
+                      <span style={{ color: 'var(--color-accent-cyan)' }}>{selected.customerId}</span> · REG_DATA: {fmt(selected.createdAt)}
                     </div>
                   </div>
                 </div>
@@ -1654,6 +2003,7 @@ export default function UsersPage() {
 
       <Toast $show={toastShow}>{toast}</Toast>
       {renderAddressModal()}
+      {renderMaintenanceModal()}
     </>
   );
 }

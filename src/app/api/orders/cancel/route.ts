@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
-import { runTransaction, doc } from 'firebase/firestore';
+import { runTransaction, doc, Timestamp } from 'firebase/firestore';
+import { executeWalletUpdate } from '@/lib/wallet';
 
 export async function POST(request: Request) {
   try {
@@ -42,16 +43,22 @@ export async function POST(request: Request) {
         throw new Error("User associated with order not found.");
       }
 
-      const currentBalance = userDoc.data().walletBalance || 0;
-      newBalance = currentBalance + totalCost;
-
-      // 1. Credit Wallet
-      transaction.update(userRef, { walletBalance: newBalance });
+      // 1. Credit Wallet using Ledger Helper
+      const { new_balance } = await executeWalletUpdate(transaction, {
+        userId,
+        amount: totalCost,
+        type: 'CANCELLATION_REFUND',
+        referenceId: orderId,
+        description: `Refund for cancelled Order #${orderId.substring(0, 8)}`,
+        createdBy: 'system'
+      });
+      
+      newBalance = new_balance;
 
       // 2. Mark Order Cancelled
       transaction.update(orderRef, { 
         status: 'cancelled', 
-        updatedAt: new Date(),
+        updatedAt: Timestamp.now(),
         refundedAmount: totalCost
       });
     });

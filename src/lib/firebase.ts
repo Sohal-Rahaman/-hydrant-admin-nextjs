@@ -1,6 +1,6 @@
 // Firebase configuration and initialization for Next.js
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, signOut, RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
 import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, QuerySnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { deleteUser as firebaseDeleteUser } from 'firebase/auth';
@@ -34,13 +34,23 @@ export const db = getFirestore(app);
 export const functions = getFunctions(app);
 
 
-// Authentication provider
-export const googleProvider = new GoogleAuthProvider();
-
-// Authentication functions
-export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
-export const signInWithEmail = (email: string, password: string) => signInWithEmailAndPassword(auth, email, password);
 export const logOut = () => signOut(auth);
+// ─── SUPERADMIN PHONE WHITELIST ─────────────────────────────────────────────
+export const SUPERADMIN_PHONES = [
+  '+917908013185', // Mr. Sohal
+  '+917001397070', // Mr. Rose
+  '+919832036181', // Mr. Motiur
+  '+911111111111', // Test Number
+];
+
+// Phone OTP auth
+export const setupRecaptcha = (containerId: string): RecaptchaVerifier => {
+  return new RecaptchaVerifier(auth, containerId, { size: 'normal' });
+};
+
+export const sendOTP = (phone: string, verifier: RecaptchaVerifier): Promise<ConfirmationResult> =>
+  signInWithPhoneNumber(auth, phone, verifier);
+
 export const deleteUser = async (userId: string) => {
   try {
     // This is an admin operation that requires a Cloud Function

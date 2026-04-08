@@ -24,7 +24,8 @@ import {
   doc,
   updateDoc,
   increment,
-  arrayUnion
+  arrayUnion,
+  where
 } from 'firebase/firestore';
 import { db, deleteDocument } from '@/lib/firebase';
 
@@ -34,10 +35,19 @@ interface UserData {
   email?: string;
   phone?: string;
   walletBalance?: number;
+  wallet_balance?: number;
   deliveryAddresses?: any[];
   isPremium?: boolean;
   createdAt: any;
-  walletHistory?: any[];
+}
+
+interface WalletTransaction {
+  id: string;
+  amount: number;
+  type: string;
+  description: string;
+  createdAt: any;
+  status: string;
 }
 
 interface LeadData {
@@ -274,7 +284,10 @@ export default function CustomersPage() {
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
+  const [adjustmentReason, setAdjustmentReason] = useState('');
 
   useEffect(() => {
     setLoading(true);
@@ -283,7 +296,15 @@ export default function CustomersPage() {
     const qLeads = query(collection(db, 'leads'));
 
     const unsubUsers = onSnapshot(qUsers, (snapshot) => {
-      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as UserData[];
+      const usersData = snapshot.docs.map(doc => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          ...d,
+          wallet_balance: d.wallet_balance ?? d.walletBalance ?? 0,
+          jars_occupied: d.jars_occupied ?? d.jarHold ?? 0,
+        };
+      }) as unknown as UserData[];
       setUsers(usersData);
       setLoading(false);
     });
@@ -296,6 +317,31 @@ export default function CustomersPage() {
     return () => { unsubUsers(); unsubLeads(); };
   }, []);
 
+  useEffect(() => {
+    if (!selectedUser) {
+      setTransactions([]);
+      return;
+    }
+
+    setTransactionsLoading(true);
+    const q = query(
+      collection(db, 'wallet_transactions'),
+      where('userId', '==', selectedUser.id),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubTxns = onSnapshot(q, (snapshot) => {
+      const txns = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      })) as WalletTransaction[];
+      setTransactions(txns);
+      setTransactionsLoading(false);
+    });
+
+    return () => unsubTxns();
+  }, [selectedUser?.id]);
+
   const filteredUsers = users.filter(u => 
     u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.phone?.includes(searchQuery) ||
@@ -306,21 +352,26 @@ export default function CustomersPage() {
     if (!selectedUser || !adjustmentAmount) return;
     const amount = parseFloat(adjustmentAmount);
     if (isNaN(amount)) return;
+    if (!adjustmentReason.trim()) {
+      alert('Please provide a reason for this adjustment.');
+      return;
+    }
 
-    const userRef = doc(db, 'users', selectedUser.id);
     const change = type === 'add' ? amount : -amount;
 
     try {
-      await updateDoc(userRef, {
-        walletBalance: increment(change),
-        walletHistory: arrayUnion({
-          type: 'admin_adjustment',
-          amount: change,
-          timestamp: new Date(),
-          reason: 'Manual adjustment by Admin'
-        })
+      const { runWalletTransaction } = await import('@/lib/wallet');
+      await runWalletTransaction({
+        userId: selectedUser.id,
+        amount: change,
+        type: 'ADMIN_ADJUSTMENT',
+        description: adjustmentReason,
+        createdBy: 'admin' 
       });
+
       setAdjustmentAmount('');
+      setAdjustmentReason('');
+      alert('Wallet adjustment recorded in ledger.');
     } catch (err) {
       console.error(err);
       alert('Failed to adjust wallet');
@@ -445,16 +496,58 @@ export default function CustomersPage() {
                 </InfoRow>
 
                 <div style={{ marginTop: '32px', borderTop: '1px solid #2e2e2e', paddingTop: '32px' }}>
-                  <div style={{ marginBottom: '20px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#666', textTransform: 'uppercase', marginBottom: '20px' }}>Recent Transactions</div>
+                  
+                  {transactionsLoading ? (
+                    <div style={{ padding: '20px', textAlign: 'center', color: '#444', fontSize: '12px' }}>Loading passbook...</div>
+                  ) : transactions.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto', marginBottom: '32px' }}>
+                      {transactions.map(txn => (
+                        <div key={txn.id} style={{ 
+                          background: '#121212', 
+                          padding: '12px', 
+                          borderRadius: '12px', 
+                          border: '1px solid #222',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: 600 }}>{txn.description}</div>
+                            <div style={{ fontSize: '10px', color: '#555' }}>
+                              {txn.createdAt?.toDate?.() ? txn.createdAt.toDate().toLocaleDateString() : 'Recent'} • {txn.type}
+                            </div>
+                          </div>
+                          <div style={{ 
+                            fontWeight: 700, 
+                            color: txn.amount > 0 ? '#10B981' : '#EF4444',
+                            fontSize: '14px'
+                          }}>
+                            {txn.amount > 0 ? '+' : ''}₹{txn.amount}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '20px', textAlign: 'center', color: '#444', fontSize: '12px', marginBottom: '32px' }}>No transaction history found.</div>
+                  )}
+
+                  <div style={{ borderTop: '1px solid #2e2e2e', paddingTop: '32px' }}>
                     <div style={{ fontSize: '11px', fontWeight: 700, color: '#666', textTransform: 'uppercase', marginBottom: '12px' }}>Manual Adjustment</div>
                     <InputField 
                       type="number" 
-                      placeholder="Enter amount..." 
+                      placeholder="Amount..." 
                       value={adjustmentAmount}
                       onChange={(e) => setAdjustmentAmount(e.target.value)}
+                      style={{ marginBottom: '12px' }}
+                    />
+                    <InputField 
+                      placeholder="Reason for adjustment..." 
+                      value={adjustmentReason}
+                      onChange={(e) => setAdjustmentReason(e.target.value)}
                     />
                   </div>
-                  <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '12px', marginBottom: '12px' }}>
                     <ActionButton variant="primary" onClick={() => handleAdjustWallet('add')}>
                       <FiArrowUpRight /> Deposit
                     </ActionButton>
@@ -462,6 +555,7 @@ export default function CustomersPage() {
                       <FiArrowDownLeft /> Deduct
                     </ActionButton>
                   </div>
+                  
                   <ActionButton variant="danger" onClick={handleDeleteUser} style={{ marginTop: '12px' }}>
                     <FiAlertCircle /> Permanent Delete
                   </ActionButton>

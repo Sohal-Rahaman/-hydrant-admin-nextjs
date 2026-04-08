@@ -142,6 +142,17 @@ const CustomerItem = styled.div`
   }
 `;
 
+const WalletTag = styled.div<{ $negative: boolean }>`
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: ${props => props.$negative ? '#fef2f2' : '#f0fdf4'};
+  color: ${props => props.$negative ? '#ef4444' : '#10b981'};
+  border: 1px solid ${props => props.$negative ? '#fee2e2' : '#dcfce7'};
+  font-family: monospace;
+`;
+
 const CustomerInfo = styled.div`
   flex: 1;
 `;
@@ -254,7 +265,15 @@ export default function CreateOrderPage() {
       try {
         const q = query(collection(db, 'users'));
         const snap = await getDocs(q);
-        const usersList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const usersList = snap.docs.map(doc => {
+          const d = doc.data();
+          return {
+            id: doc.id,
+            ...d,
+             wallet_balance: d.wallet_balance ?? d.walletBalance ?? 0,
+             jars_occupied: d.jars_occupied ?? d.jarHold ?? 0,
+          };
+        });
         setUsers(usersList);
       } catch (err) {
         console.error('Error fetching users:', err);
@@ -302,8 +321,10 @@ export default function CreateOrderPage() {
           pincode: pincode.trim(),
           landmark: landmark.trim(),
           locationCode: locationCode.trim(),
-          walletBalance: -200, // ₹200 deposit for jar
-          jarCount: 1, // 1 free jar
+          wallet_balance: -200, // ₹200 deposit for jar
+          walletBalance: -200, // Legacy support
+          jars_occupied: 1, // 1 free jar
+          jarCount: 1, // Legacy support
           createdAt: Timestamp.fromDate(new Date()),
           updatedAt: Timestamp.fromDate(new Date()),
           role: 'customer'
