@@ -8,7 +8,7 @@ interface AuthContextType {
   currentUser: User | null;
   userData: any | null; // Compatibility layer for legacy components
   isAdmin: boolean;
-  role: 'superadmin' | 'admin' | 'user' | null;
+  role: 'superadmin' | 'admin' | 'developer' | 'marketing' | 'analytics' | 'manager' | 'user' | null;
   permissions: string[];
   staffData: StaffMember | null;
   loading: boolean;
@@ -33,7 +33,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading]         = useState(true);
   const [isAdmin, setIsAdmin]         = useState(false);
-  const [role, setRole]               = useState<'superadmin' | 'admin' | 'user' | null>(null);
+  const [role, setRole]               = useState<'superadmin' | 'admin' | 'developer' | 'marketing' | 'analytics' | 'manager' | 'user' | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [staffData, setStaffData]     = useState<StaffMember | null>(null);
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);

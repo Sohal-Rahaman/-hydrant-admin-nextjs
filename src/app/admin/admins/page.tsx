@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
-import { addDocument, updateDocument, getAllAdmins, getAllUsers, StaffMember, SUPERADMIN_PHONES } from '@/lib/firebase';
+import { addDocument, updateDocument, getAllAdmins, getAllUsers, StaffMember, SUPERADMIN_PHONES, User } from '@/lib/firebase';
 import { logActivity } from '@/lib/activityLogger';
 import { 
   FiShield, 
@@ -363,7 +363,7 @@ export default function AdminsPage() {
       
       for (const phone of missingSuperAdmins) {
         const normalized = phone.replace(/[^\d+]/g, '');
-        const matchingUser = allUsers.find(u => (u.phone || '').replace(/[^\d+]/g, '') === normalized);
+        const matchingUser = allUsers.find((u: User) => (u.phone || '').replace(/[^\d+]/g, '') === normalized);
         
         // Placeholder names mapping from firebase.ts comments
         const placeholderNames: Record<string, string> = {

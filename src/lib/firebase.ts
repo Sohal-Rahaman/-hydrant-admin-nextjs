@@ -132,13 +132,23 @@ export const getAllOrders = async () => {
   }
 };
 
-export const getAllUsers = async () => {
+export interface User {
+  id: string;
+  full_name?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  customerId?: string;
+  [key: string]: any;
+}
+
+export const getAllUsers = async (): Promise<User[]> => {
   try {
     const querySnapshot = await getDocs(collection(db, 'users'));
     return querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
-    }));
+    } as User));
   } catch (error) {
     console.error('Error fetching users:', error);
     return [];
