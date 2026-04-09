@@ -2,7 +2,7 @@
 
 import React, { ReactNode, useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
-import { FiPhone, FiShield, FiLock, FiArrowRight, FiCheckCircle } from 'react-icons/fi';
+import { FiPhone, FiShield, FiLock, FiArrowRight, FiCheckCircle, FiMessageSquare } from 'react-icons/fi';
 import { useAuth } from '@/context/AuthContext';
 import { setupRecaptcha, sendOTP, SUPERADMIN_PHONES } from '@/lib/firebase';
 import { RecaptchaVerifier } from 'firebase/auth';
@@ -131,6 +131,21 @@ const SubmitButton = styled.button`
   }
 `;
 
+const SecondaryButton = styled(SubmitButton)`
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+  
+  &:hover {
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.3);
+    color: #4ade80;
+    box-shadow: 0 10px 20px -5px rgba(34, 197, 94, 0.1);
+  }
+`;
+
 const ErrorBox = styled.div`
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.2);
@@ -196,20 +211,21 @@ const DevHelpBox = styled.div`
 `;
 
 const AdminRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { currentUser, isAdmin, loading, signOut, checkAdminPrivileges, confirmationResult, setConfirmationResult } = useAuth();
-  
   const [phone, setPhone] = useState('+91');
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [otpMethod, setOtpMethod] = useState<'firebase' | 'whatsapp'>('firebase');
+  const [verificationId, setVerificationId] = useState<string | null>(null);
+  const { currentUser, isAdmin, loading, signOut, checkAdminPrivileges, confirmationResult, setConfirmationResult, loginWithWhatsApp } = useAuth();
   
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
 
   // Function to initialize reCAPTCHA on-demand
   const initRecaptcha = async () => {
     if (recaptchaRef.current) {
-      try { recaptchaRef.current.clear(); } catch (e) {}
+      try { recaptchaRef.current.clear(); } catch (_) {}
     }
     const verifier = setupRecaptcha('recaptcha-container');
     recaptchaRef.current = verifier;
@@ -221,7 +237,7 @@ const AdminRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
     // Cleanup on unmount
     return () => {
       if (recaptchaRef.current) {
-        try { recaptchaRef.current.clear(); } catch (e) {}
+        try { recaptchaRef.current.clear(); } catch (_) {}
       }
     };
   }, []);
@@ -229,6 +245,7 @@ const AdminRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setOtpMethod('firebase');
 
     // Basic format check (must start with +91)
     if (!phone.startsWith('+91') || phone.length < 13) {
@@ -239,11 +256,8 @@ const AdminRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
     // Normalize input for whitelist check (strip everything except + and digits)
     const normalizedPhone = phone.replace(/[^\d+]/g, '');
 
-    // WHITELIST CHECK: Only allow superadmins to trigger OTP
-    if (!SUPERADMIN_PHONES.includes(normalizedPhone)) {
-      setError(`Access Denied: ${normalizedPhone} is not in the superadmin whitelist.`);
-      return;
-    }
+    // Note: Authorization is strictly enforced in AuthContext after login.
+    // We allow the OTP send phase here for all registered staff members.
 
     setIsActionLoading(true);
     try {
@@ -262,7 +276,7 @@ const AdminRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
         msg = 'Credential Error: Please ensure localhost is white-listed in Firebase Console (Auth > Settings > Authorized Domains).';
         // Reset reCAPTCHA on this specific error
         if (recaptchaRef.current) {
-          try { recaptchaRef.current.clear(); } catch (e) {}
+          try { recaptchaRef.current.clear(); } catch (_) {}
           recaptchaRef.current = null;
         }
       }
@@ -273,22 +287,67 @@ const AdminRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
     }
   };
 
-  const handleVerifyOTP = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!confirmationResult) return;
-    
+  const handleSendWhatsAppOTP = async () => {
     setError(null);
     setIsActionLoading(true);
-    
+    setOtpMethod('whatsapp');
+
     try {
-      const userCredential = await confirmationResult.confirm(otp);
-      // Wait for AuthContext to detect change and check admin status
-      await checkAdminPrivileges(userCredential.user);
+      const response = await fetch('/api/auth/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to send WhatsApp OTP');
+
+      setVerificationId(data.verificationId);
+      setStep('otp');
     } catch (err: unknown) {
-      console.error('OTP Verify Error:', err);
-      setError('Invalid OTP code. Please check and try again.');
+      console.error('WhatsApp Send Error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to send WhatsApp OTP');
     } finally {
       setIsActionLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setIsActionLoading(true);
+
+    if (otpMethod === 'firebase') {
+      if (!confirmationResult) return;
+      try {
+        const userCredential = await confirmationResult.confirm(otp);
+        await checkAdminPrivileges(userCredential.user);
+      } catch (err: unknown) {
+        console.error('OTP Verify Error:', err);
+        setError('Invalid OTP code. Please check and try again.');
+      } finally {
+        setIsActionLoading(false);
+      }
+    } else {
+      // WhatsApp Verification
+      try {
+        const response = await fetch('/api/auth/whatsapp/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ otp, verificationId }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Invalid WhatsApp OTP');
+
+        // Success - Log in manually
+        loginWithWhatsApp(phone);
+      } catch (err: unknown) {
+        console.error('WhatsApp Verify Error:', err);
+        setError(err instanceof Error ? err.message : 'Invalid WhatsApp OTP');
+      } finally {
+        setIsActionLoading(false);
+      }
     }
   };
 
@@ -343,7 +402,7 @@ const AdminRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
           <SubTitle>Superadmin Console Authentication</SubTitle>
 
           <StatusBadge $active={step === 'otp'}>
-            {step === 'phone' ? 'Waiting for credentials' : 'OTP Sent Successfully'}
+            {step === 'phone' ? 'Waiting for credentials' : `OTP Sent via ${otpMethod === 'firebase' ? 'SMS' : 'WhatsApp'}`}
           </StatusBadge>
 
           {error && (
@@ -417,6 +476,19 @@ const AdminRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
               )
             )}
           </SubmitButton>
+
+          {step === 'phone' && (
+            <SecondaryButton 
+              type="button" 
+              onClick={() => {
+                setOtpMethod('whatsapp');
+                handleSendWhatsAppOTP();
+              }} 
+              disabled={isActionLoading || phone.length < 13}
+            >
+              <FiMessageSquare /> Login via WhatsApp
+            </SecondaryButton>
+          )}
 
           {step === 'otp' && (
             <BackLink 

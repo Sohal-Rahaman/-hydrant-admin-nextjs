@@ -145,6 +145,49 @@ export const getAllUsers = async () => {
   }
 };
 
+export interface StaffMember {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string; // Gmail/Google Account
+  role: 'superadmin' | 'admin' | 'developer' | 'marketing' | 'analytics' | 'manager' | 'user';
+  permissions: string[];
+  status: 'active' | 'inactive';
+  createdAt: any;
+  addedBy?: string;
+}
+
+export const getAdminDataByPhone = async (phone: string): Promise<StaffMember | null> => {
+  try {
+    const normalized = phone.replace(/[^\d+]/g, '');
+    const q = query(collection(db, 'admins'), where('phone', '==', normalized), where('status', '==', 'active'));
+    const querySnapshot = await getDocs(q);
+    
+    if (!querySnapshot.empty) {
+      const doc = querySnapshot.docs[0];
+      return { id: doc.id, ...doc.data() } as StaffMember;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching admin data:', error);
+    return null;
+  }
+};
+
+export const getAllAdmins = async (): Promise<StaffMember[]> => {
+  try {
+    const q = query(collection(db, 'admins'), orderBy('createdAt', 'desc'));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    } as StaffMember));
+  } catch (error) {
+    console.error('Error fetching admins:', error);
+    return [];
+  }
+};
+
 export const getOrdersByStatus = async (status: string) => {
   try {
     const querySnapshot = await getDocs(query(collection(db, 'orders'), where('status', '==', status), orderBy('createdAt', 'desc')));

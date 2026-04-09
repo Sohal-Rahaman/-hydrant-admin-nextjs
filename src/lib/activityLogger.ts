@@ -18,6 +18,8 @@ export type ActivityAction =
   | 'SYSTEM_ALERT'
   | 'ORDER_EDITED_BY_ADMIN'
   | 'USER_EDITED_BY_ADMIN'
+  | 'STAFF_ADDED'
+  | 'STAFF_UPDATED'
   | 'OTHER';
 
 export interface LogActivityParams {

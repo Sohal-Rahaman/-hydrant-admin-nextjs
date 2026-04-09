@@ -5,7 +5,7 @@ import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FiActivity, FiSearch, FiFilter, FiUser, FiPackage,
-  FiCreditCard, FiTrash2, FiClock, FiRefreshCw
+  FiCreditCard, FiTrash2, FiClock, FiRefreshCw, FiShield
 } from 'react-icons/fi';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -28,6 +28,7 @@ const getActivityIcon = (action: string) => {
   if (upperAction.includes('WALLET') || upperAction.includes('PAYMENT')) return <FiCreditCard />;
   if (upperAction.includes('DELETE')) return <FiTrash2 />;
   if (upperAction.includes('JAR')) return <FiPackage />;
+  if (upperAction.includes('STAFF') || upperAction.includes('ADMIN')) return <FiShield />;
   return <FiActivity />;
 };
 
@@ -38,6 +39,7 @@ const getActivityColor = (action: string) => {
   if (upperAction.includes('DELIVERED')) return 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)';
   if (upperAction.includes('WALLET') || upperAction.includes('PAYMENT')) return 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)';
   if (upperAction.includes('JAR')) return 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+  if (upperAction.includes('STAFF') || upperAction.includes('ADMIN')) return 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)';
   return 'linear-gradient(135deg, #64748b 0%, #475569 100%)';
 };
 

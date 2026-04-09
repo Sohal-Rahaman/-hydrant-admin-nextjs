@@ -31,7 +31,8 @@ import {
   FiShoppingCart,
   FiGift,
   FiLink,
-  FiGrid
+  FiGrid,
+  FiLock
 } from 'react-icons/fi';
 import { useAuth } from '@/context/AuthContext';
 
@@ -309,6 +310,44 @@ const Overlay = styled(motion.div)`
   }
 `;
 
+const RestrictedContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 40px;
+  text-align: center;
+  background: rgba(15, 23, 42, 0.02);
+`;
+
+const RestrictedIcon = styled.div`
+  font-size: 4rem;
+  color: #ef4444;
+  margin-bottom: 24px;
+  animation: pulse 2s infinite;
+
+  @keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.7; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+`;
+
+const RestrictedTitle = styled.h2`
+  font-size: 1.8rem;
+  font-weight: 800;
+  margin-bottom: 12px;
+  color: #1e293b;
+`;
+
+const RestrictedText = styled.p`
+  color: #64748b;
+  max-width: 400px;
+  margin-bottom: 32px;
+  line-height: 1.6;
+`;
+
 interface AdminLayoutProps {
   children: ReactNode;
 }
@@ -318,32 +357,43 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const { userData, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-
   const navigationItems = [
-    { path: '/admin', label: 'Dashboard', icon: FiHome },
-    { path: '/admin/orders', label: 'Orders', icon: FiPackage },
-    { path: '/admin/create-order', label: 'Create Order', icon: FiShoppingCart },
-    { path: '/admin/users', label: 'Users', icon: FiUsers },
-    { path: '/admin/users?mode=fleet', label: 'Fleet Board', icon: FiGrid },
-    { path: '/admin/crm', label: 'CRM & Leads', icon: FiBriefcase },
-    { path: '/admin/subscriptions', label: 'Subscriptions', icon: FiRepeat },
-    { path: '/admin/wallet', label: 'Wallet Mgmt', icon: FiCreditCard },
-    { path: '/admin/referrals', label: 'Referrals', icon: FiGift },
-    { path: '/admin/jars', label: 'Jar Holdings', icon: FiArchive },
-    { path: '/admin/trials', label: 'Trial Customers', icon: FiFlag },
-    { path: '/admin/dues', label: 'Due Amounts', icon: FiAlertCircle },
-    { path: '/admin/expenses', label: 'Expenses', icon: FiDollarSign },
-    { path: '/admin/army', label: 'Army Management', icon: FiTruck },
-    { path: '/admin/support', label: 'Support Tickets', icon: FiMessageSquare },
-    ...(userData?.role === 'superadmin' ? [{ path: '/admin/admins', label: 'Admins', icon: FiShield }] : []),
-    { path: '/admin/coupons', label: 'Coupons', icon: FiTag },
-    { path: '/admin/activity', label: 'Activity Log', icon: FiActivity },
-    { path: '/admin/notifications', label: 'Notifications', icon: FiBell },
-    { path: '/admin/deletion-requests', label: 'Deletion Requests', icon: FiUserX },
-    { path: '/admin/delivery', label: 'Delivery Map', icon: FiMapPin },
-    { path: '/admin/analytics', label: 'Analytics', icon: FiBarChart },
-    { path: '/admin/settings/integrations', label: 'App Integrations', icon: FiLink },
+    { path: '/admin', label: 'Dashboard', icon: FiHome, permission: 'all' },
+    { path: '/admin/orders', label: 'Orders', icon: FiPackage, permission: 'orders' },
+    { path: '/admin/create-order', label: 'Create Order', icon: FiShoppingCart, permission: 'orders' },
+    { path: '/admin/users', label: 'Users', icon: FiUsers, permission: 'crm' },
+    { path: '/admin/users?mode=fleet', label: 'Fleet Board', icon: FiGrid, permission: 'fleet' },
+    { path: '/admin/crm', label: 'CRM & Leads', icon: FiBriefcase, permission: 'crm' },
+    { path: '/admin/subscriptions', label: 'Subscriptions', icon: FiRepeat, permission: 'orders' },
+    { path: '/admin/wallet', label: 'Wallet Mgmt', icon: FiCreditCard, permission: 'wallet' },
+    { path: '/admin/referrals', label: 'Referrals', icon: FiGift, permission: 'marketing' },
+    { path: '/admin/jars', label: 'Jar Holdings', icon: FiArchive, permission: 'inventory' },
+    { path: '/admin/trials', label: 'Trial Customers', icon: FiFlag, permission: 'orders' },
+    { path: '/admin/dues', label: 'Due Amounts', icon: FiAlertCircle, permission: 'wallet' },
+    { path: '/admin/expenses', label: 'Expenses', icon: FiDollarSign, permission: 'wallet' },
+    { path: '/admin/army', label: 'Army Management', icon: FiTruck, permission: 'fleet' },
+    { path: '/admin/support', label: 'Support Tickets', icon: FiMessageSquare, permission: 'support' },
+    { path: '/admin/admins', label: 'Manage Roles', icon: FiLock, permission: 'staff' },
+    { path: '/admin/coupons', label: 'Coupons', icon: FiTag, permission: 'marketing' },
+    { path: '/admin/activity', label: 'Activity Log', icon: FiActivity, permission: 'staff' },
+    { path: '/admin/notifications', label: 'Notifications', icon: FiBell, permission: 'all' },
+    { path: '/admin/deletion-requests', label: 'Deletion Requests', icon: FiUserX, permission: 'staff' },
+    { path: '/admin/delivery', label: 'Delivery Map', icon: FiMapPin, permission: 'fleet' },
+    { path: '/admin/analytics', label: 'Analytics', icon: FiBarChart, permission: 'analytics' },
+    { path: '/admin/settings/integrations', label: 'App Integrations', icon: FiLink, permission: 'all' },
   ];
+
+  const { permissions = [], role } = useAuth();
+  const filteredNavigationItems = navigationItems.filter(item => {
+    // Grant full access if permissions include 'all' OR if role is admin/superadmin
+    if (permissions.includes('all') || role === 'superadmin' || role === 'admin') return true;
+    return permissions.includes(item.permission);
+  });
+
+  const isAccessDenied = navigationItems.some(item => 
+    item.path.split('?')[0] === pathname && 
+    !filteredNavigationItems.some(f => f.path === item.path)
+  );
 
   const handleNavClick = (path: string) => {
     console.log('🚀 Navigating to:', path);
@@ -415,7 +465,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         </SidebarHeader>
 
         <NavMenu>
-          {navigationItems.map((item) => (
+          {filteredNavigationItems.map((item) => (
             <NavItem
               key={item.path}
               $active={pathname === item.path}
@@ -468,7 +518,27 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         </MobileTopbar>
 
         <ContentArea>
-          {children}
+          {isAccessDenied ? (
+            <RestrictedContainer>
+              <RestrictedIcon>
+                <FiLock />
+              </RestrictedIcon>
+              <RestrictedTitle>Access Restricted</RestrictedTitle>
+              <RestrictedText>
+                You don't have the required permissions to access this module. 
+                Please contact a superadmin if you believe this is an error.
+              </RestrictedText>
+              <NavItem 
+                $active={false} 
+                onClick={() => router.push('/admin')}
+                style={{ width: 'auto', background: '#3b82f6', color: 'white' }}
+              >
+                Return to Dashboard
+              </NavItem>
+            </RestrictedContainer>
+          ) : (
+            children
+          )}
         </ContentArea>
       </MainContent>
     </LayoutContainer>
