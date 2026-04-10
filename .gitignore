@@ -50,3 +50,7 @@ ui-debug.log*
 Thumbs.db
 # Local Netlify folder
 .netlify
+
+# Generated QR images
+scripts/jar_qr/
+public/qrcodes/
