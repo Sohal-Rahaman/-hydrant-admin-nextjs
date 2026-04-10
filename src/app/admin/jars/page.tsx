@@ -1,492 +1,300 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
-import { subscribeToCollection, updateDocument } from '@/lib/firebase';
-import { logActivity } from '@/lib/activityLogger';
-import { useAuth } from '@/context/AuthContext';
-import { FiSearch, FiEdit3, FiSave, FiX, FiBox, FiPhone, FiMessageCircle } from 'react-icons/fi';
+import { useRouter } from 'next/navigation';
+import { subscribeToCollection, Jar, getAllUsers, User } from '@/lib/firebase';
+import { 
+  FiPackage, 
+  FiLock, 
+  FiCheckCircle, 
+  FiAlertTriangle, 
+  FiSearch,
+  FiCalendar,
+  FiUser,
+  FiPrinter
+} from 'react-icons/fi';
 
-interface User {
-  id: string;
-  name: string;
-  phone: string;
-  customerId: string;
-  jars_occupied: number;
-  jarHold: number;
-}
-
-const PageContainer = styled.div`
+const Container = styled.div`
   padding: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
 `;
 
-const Header = styled.div`
-  margin-bottom: 24px;
+const StatsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 32px;
+`;
+
+const StatCard = styled.div<{ $color: string }>`
+  background: white;
+  padding: 20px;
+  border-radius: 16px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  border-left: 4px solid ${props => props.$color};
+`;
+
+const StatLabel = styled.p`
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+`;
+
+const StatValue = styled.p`
+  color: #1e293b;
+  font-size: 24px;
+  font-weight: 700;
+`;
+
+const TableCard = styled.div`
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+`;
+
+const Controls = styled.div`
+  padding: 20px;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
+  border-bottom: 1px solid #f1f5f9;
   flex-wrap: wrap;
   gap: 16px;
 `;
 
-const TitleBox = styled.div``;
-
-const Title = styled.h1`
-  font-size: 24px;
-  font-weight: 700;
-  color: #1f2937;
-  margin: 0 0 4px 0;
-`;
-
-const Subtitle = styled.p`
-  color: #6b7280;
-  font-size: 14px;
-  margin: 0;
-`;
-
-const SummaryCard = styled.div`
-  background: white;
-  padding: 16px 24px;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  border: 1px solid #e5e7eb;
-`;
-
-const SummaryIcon = styled.div`
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: #eff6ff;
-  color: #3b82f6;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-`;
-
-const SummaryInfo = styled.div``;
-
-const SummaryValue = styled.div`
-  font-size: 20px;
-  font-weight: 700;
-  color: #111827;
-`;
-
-const SummaryLabel = styled.div`
-  font-size: 13px;
-  color: #6b7280;
-  font-weight: 500;
-`;
-
-const ControlsContainer = styled.div`
-  margin-bottom: 24px;
-`;
-
-const SearchBox = styled.div`
+const SearchInput = styled.div`
   position: relative;
-  max-width: 400px;
-
+  width: 300px;
+  
+  input {
+    width: 100%;
+    padding: 10px 10px 10px 40px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    font-size: 14px;
+  }
+  
   svg {
     position: absolute;
     left: 12px;
     top: 50%;
     transform: translateY(-50%);
-    color: #9ca3af;
+    color: #94a3b8;
   }
-`;
-
-const SearchInput = styled.input`
-  width: 100%;
-  padding: 10px 12px 10px 36px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  outline: none;
-  font-size: 14px;
-  transition: all 0.2s;
-
-  &:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
-  }
-`;
-
-const ListCard = styled.div`
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
 `;
 
 const Table = styled.table`
   width: 100%;
   border-collapse: collapse;
-`;
-
-const Th = styled.th`
-  background: #f9fafb;
-  padding: 12px 16px;
-  text-align: left;
-  font-size: 12px;
-  font-weight: 600;
-  color: #6b7280;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 1px solid #e5e7eb;
-`;
-
-const Td = styled.td`
-  padding: 16px;
-  border-bottom: 1px solid #e5e7eb;
-  vertical-align: middle;
-`;
-
-const Tr = styled.tr`
-  &:last-child td {
-    border-bottom: none;
+  
+  th {
+    text-align: left;
+    padding: 16px;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
   }
-  &:hover {
-    background: #f9fafb;
+  
+  td {
+    padding: 16px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 14px;
+    color: #475569;
   }
 `;
 
-const UserInfo = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-`;
-
-const Avatar = styled.div`
-  width: 40px;
-  height: 40px;
+const StatusBadge = styled.span<{ $status: string }>`
+  padding: 4px 10px;
   border-radius: 20px;
-  background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  font-weight: 600;
-`;
-
-const NameColumn = styled.div`
-  display: flex;
-  flex-direction: column;
-`;
-
-const NameText = styled.span`
-  font-weight: 600;
-  color: #111827;
-`;
-
-const IdText = styled.span`
   font-size: 12px;
-  color: #6b7280;
-  background: #f3f4f6;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-top: 4px;
-  display: inline-block;
-  width: fit-content;
-`;
-
-const JarBadge = styled.span`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 14px;
-  font-weight: 700;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border: 1px solid #bfdbfe;
-`;
-
-const ActionButtons = styled.div`
-  display: flex;
-  gap: 8px;
-`;
-
-const IconBtn = styled.button<{ $color: string; $bg?: string }>`
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  border: 1px solid ${props => props.$bg ? 'transparent' : '#e5e7eb'};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  background: ${props => props.$bg || 'white'};
-  color: ${props => props.$color};
-  transition: all 0.2s;
-
-  &:hover {
-    background: ${props => props.$bg ? props.$bg + 'CC' : '#f9fafb'};
-    border-color: ${props => props.$bg ? 'transparent' : '#d1d5db'};
-  }
-  
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-`;
-
-const EditInput = styled.input`
-  width: 80px;
-  padding: 8px 12px;
-  border: 1px solid #3b82f6;
-  border-radius: 6px;
-  font-size: 14px;
   font-weight: 600;
-  color: #111827;
-  outline: none;
+  text-transform: capitalize;
   
-  &:focus {
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-  }
+  background: ${props => {
+    switch(props.$status) {
+      case 'available': return '#f0fdf4';
+      case 'locked': return '#eff6ff';
+      case 'lost': return '#fef2f2';
+      default: return '#f8fafc';
+    }
+  }};
+  
+  color: ${props => {
+    switch(props.$status) {
+      case 'available': return '#16a34a';
+      case 'locked': return '#2563eb';
+      case 'lost': return '#dc2626';
+      default: return '#64748b';
+    }
+  }};
 `;
 
-const EmptyState = styled.div`
-  padding: 48px;
-  text-align: center;
-  color: #6b7280;
-`;
-
-export default function JarHoldingsPage() {
-  const { userData } = useAuth();
-  const [users, setUsers] = useState<User[]>([]);
+export default function JarsInventoryPage() {
+  const [jars, setJars] = useState<Jar[]>([]);
+  const [users, setUsers] = useState<Record<string, User>>({});
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState<string>('');
-  const [isSaving, setIsSaving] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
-    const unsub = subscribeToCollection('users', (snapshot) => {
-      const formatted: User[] = snapshot.docs.map((d: any) => ({
-        id: d.id,
-        name: d.full_name || d.name || d.firstName + ' ' + (d.lastName || '') || 'Unknown',
-        phone: d.phone || d.phoneNumber || '',
-        customerId: d.customerId || '',
-        jars_occupied: Number(d.jars_occupied) || 0,
-        jarHold: Number(d.jarHold) || 0,
-      }));
-      setUsers(formatted);
+    // Fetch users for mapping IDs to names
+    getAllUsers().then(u => {
+      const userMap = u.reduce((acc, user) => {
+        acc[user.id] = user;
+        if (user.customerId) acc[user.customerId] = user;
+        return acc;
+      }, {} as Record<string, User>);
+      setUsers(userMap);
+    });
+
+    // Subscribe to Jars
+    const unsubscribe = subscribeToCollection('jars', (snapshot) => {
+      const jarList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Jar));
+      setJars(jarList);
       setLoading(false);
     });
-    return () => unsub();
+
+    return () => unsubscribe();
   }, []);
 
-  const filteredUsers = useMemo(() => {
-    // Only show users with jars
-    let result = users.filter(u => (u.jars_occupied > 0 || u.jarHold > 0));
-
-    if (searchTerm) {
-      const q = searchTerm.toLowerCase();
-      result = result.filter(u => 
-        u.name.toLowerCase().includes(q) ||
-        u.phone.includes(q) ||
-        u.customerId.toLowerCase().includes(q)
-      );
-    }
-
-    // Sort descending by jar count
-    result.sort((a, b) => {
-      const countA = a.jars_occupied || a.jarHold || 0;
-      const countB = b.jars_occupied || b.jarHold || 0;
-      return countB - countA;
-    });
-
-    return result;
-  }, [users, searchTerm]);
-
-  const totalJarsCount = useMemo(() => {
-    return filteredUsers.reduce((sum, u) => sum + (u.jars_occupied || u.jarHold || 0), 0);
-  }, [filteredUsers]);
-
-  const handleWhatsApp = (phone: string) => {
-    if (!phone) return;
-    const cleanPhone = phone.replace(/[^\d]/g, '');
-    const p = cleanPhone.startsWith('91') ? cleanPhone : '91' + cleanPhone;
-    window.open(`https://wa.me/${p}`, '_blank');
+  const stats = {
+    total: jars.length,
+    available: jars.filter(j => j.status === 'available').length,
+    locked: jars.filter(j => j.status === 'locked').length,
+    lost: jars.filter(j => j.status === 'lost').length
   };
 
-  const handleCall = (phone: string) => {
-    if (!phone) return;
-    window.open(`tel:${phone}`);
-  };
-
-  const startEdit = (user: User) => {
-    setEditingId(user.id);
-    setEditValue(String(user.jars_occupied || user.jarHold || 0));
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditValue('');
-  };
-
-  const saveEdit = async (user: User) => {
-    const newCount = parseInt(editValue, 10);
-    if (isNaN(newCount) || newCount < 0) {
-      alert('Please enter a valid positive number');
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      // Update both fields for backward compatibility, as seen in userSlice.ts of mobile app
-      await updateDocument('users', user.id, {
-        jars_occupied: newCount,
-        jarHold: newCount
-      });
-
-      await logActivity({
-        actorId: userData?.id || 'unknown',
-        actorName: userData?.displayName || userData?.email || 'Unknown Admin',
-        actor: 'ADMIN',
-        action: 'JAR_UPDATED',
-        targetId: user.id,
-        details: `Updated jar hold count for user ${user.name} from ${user.jars_occupied || user.jarHold} to ${newCount}`
-      });
-
-      setEditingId(null);
-    } catch (error) {
-      console.error('Error updating jar count:', error);
-      alert('Failed to update jar count');
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  const filteredJars = jars.filter(j => 
+    j.id.toLowerCase().includes(search.toLowerCase()) || 
+    (j.currentOwnerId && users[j.currentOwnerId]?.name?.toLowerCase().includes(search.toLowerCase()))
+  );
 
   return (
-    <PageContainer>
-      <Header>
-        <TitleBox>
-          <Title>Jar Holdings</Title>
-          <Subtitle>Track unfilled water jars currently held by customers</Subtitle>
-        </TitleBox>
+    <Container>
+      <div style={{ marginBottom: '32px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <h1 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a' }}>Jar Inventory</h1>
+          <p style={{ color: '#64748b' }}>Real-time tracking of all 20L jars in circulation</p>
+        </div>
+        <button
+          onClick={() => router.push('/admin/jars/qr-print')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '8px',
+            padding: '10px 20px', borderRadius: '10px',
+            background: '#0f172a', color: '#fff',
+            fontWeight: '700', border: 'none', cursor: 'pointer', fontSize: '14px',
+          }}
+        >
+          <FiPrinter /> Print QR Labels
+        </button>
+      </div>
 
-        {!loading && (
-          <SummaryCard>
-            <SummaryIcon>
-              <FiBox />
-            </SummaryIcon>
-            <SummaryInfo>
-              <SummaryValue>{totalJarsCount}</SummaryValue>
-              <SummaryLabel>Total Jars Held</SummaryLabel>
-            </SummaryInfo>
-            <div style={{ width: 1, height: 32, background: '#e5e7eb', margin: '0 8px' }} />
-            <SummaryInfo>
-              <SummaryValue>{filteredUsers.length}</SummaryValue>
-              <SummaryLabel>Customers</SummaryLabel>
-            </SummaryInfo>
-          </SummaryCard>
+      <StatsGrid>
+        <StatCard $color="#94a3b8">
+          <StatLabel><FiPackage style={{ marginBottom: '-2px' }} /> Total Jars</StatLabel>
+          <StatValue>{stats.total}</StatValue>
+        </StatCard>
+        <StatCard $color="#10b981">
+          <StatLabel><FiCheckCircle style={{ marginBottom: '-2px' }} /> In Warehouse</StatLabel>
+          <StatValue>{stats.available}</StatValue>
+        </StatCard>
+        <StatCard $color="#3b82f6">
+          <StatLabel><FiLock style={{ marginBottom: '-2px' }} /> With Customers</StatLabel>
+          <StatValue>{stats.locked}</StatValue>
+        </StatCard>
+        <StatCard $color="#ef4444">
+          <StatLabel><FiAlertTriangle style={{ marginBottom: '-2px' }} /> Reported Lost</StatLabel>
+          <StatValue>{stats.lost}</StatValue>
+        </StatCard>
+      </StatsGrid>
+
+      <TableCard>
+        <Controls>
+          <SearchInput>
+            <FiSearch />
+            <input 
+              type="text" 
+              placeholder="Search by Jar ID or Customer..." 
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </SearchInput>
+        </Controls>
+
+        <Table>
+          <thead>
+            <tr>
+              <th>Jar ID</th>
+              <th>Status</th>
+              <th>Current Owner</th>
+              <th>Last Scan At</th>
+              <th>Hold Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredJars.map(jar => {
+              const owner = jar.currentOwnerId ? users[jar.currentOwnerId] : null;
+              const lastScan = jar.lastScanAt?.toDate ? jar.lastScanAt.toDate() : new Date(jar.lastScanAt);
+              const holdDays = jar.status === 'locked' 
+                ? Math.floor((new Date().getTime() - lastScan.getTime()) / (1000 * 3600 * 24))
+                : 0;
+
+              return (
+                <tr key={jar.id}>
+                  <td style={{ fontWeight: '700', color: '#1e293b' }}>{jar.id}</td>
+                  <td>
+                    <StatusBadge $status={jar.status}>{jar.status}</StatusBadge>
+                  </td>
+                  <td>
+                    {owner ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <FiUser color="#94a3b8" />
+                        <div>
+                          <div style={{ fontWeight: '600' }}>{owner.name || owner.full_name}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                            {owner.phone} &bull; <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{owner.customerId || 'ID Pending'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <span style={{ color: '#cbd5e1' }}>Warehouse</span>
+                    )}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FiCalendar color="#94a3b8" />
+                      {lastScan.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                    </div>
+                  </td>
+                  <td>
+                    {jar.status === 'locked' && (
+                      <span style={{ 
+                        color: holdDays > 5 ? '#dc2626' : '#64748b',
+                        fontWeight: holdDays > 5 ? '700' : '400'
+                      }}>
+                        {holdDays} days
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+        
+        {filteredJars.length === 0 && (
+          <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+            No jars found matching your search.
+          </div>
         )}
-      </Header>
-
-      <ControlsContainer>
-        <SearchBox>
-          <FiSearch />
-          <SearchInput 
-            placeholder="Search by name, phone, or ID..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </SearchBox>
-      </ControlsContainer>
-
-      <ListCard>
-        {loading ? (
-          <EmptyState>Loading jar holdings...</EmptyState>
-        ) : filteredUsers.length === 0 ? (
-          <EmptyState>No customers are currently holding any jars.</EmptyState>
-        ) : (
-          <Table>
-            <thead>
-              <Tr>
-                <Th>Customer</Th>
-                <Th>Contact</Th>
-                <Th>Jars Held</Th>
-                <Th>Actions</Th>
-              </Tr>
-            </thead>
-            <tbody>
-              {filteredUsers.map(user => {
-                const isEditing = editingId === user.id;
-                const holdCount = user.jars_occupied || user.jarHold || 0;
-
-                return (
-                  <Tr key={user.id}>
-                    <Td>
-                      <UserInfo>
-                        <Avatar>{user.name.charAt(0).toUpperCase()}</Avatar>
-                        <NameColumn>
-                          <NameText>{user.name}</NameText>
-                          <IdText>{user.customerId || 'No ID'}</IdText>
-                        </NameColumn>
-                      </UserInfo>
-                    </Td>
-                    <Td>
-                      <div style={{ color: '#4b5563', fontSize: '14px' }}>{user.phone || 'N/A'}</div>
-                    </Td>
-                    <Td>
-                      {isEditing ? (
-                        <EditInput 
-                          type="number"
-                          min="0"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') saveEdit(user);
-                            if (e.key === 'Escape') cancelEdit();
-                          }}
-                        />
-                      ) : (
-                        <JarBadge>
-                          <FiBox />
-                          {holdCount} {holdCount === 1 ? 'Jar' : 'Jars'}
-                        </JarBadge>
-                      )}
-                    </Td>
-                    <Td>
-                      {isEditing ? (
-                        <ActionButtons>
-                          <IconBtn $color="white" $bg="#10b981" title="Save" onClick={() => saveEdit(user)} disabled={isSaving}>
-                            <FiSave />
-                          </IconBtn>
-                          <IconBtn $color="#6b7280" title="Cancel" onClick={cancelEdit} disabled={isSaving}>
-                            <FiX />
-                          </IconBtn>
-                        </ActionButtons>
-                      ) : (
-                        <ActionButtons>
-                          <IconBtn $color="#8b5cf6" title="Update Jar Count" onClick={() => startEdit(user)}>
-                            <FiEdit3 />
-                          </IconBtn>
-                          <div style={{ width: 1, background: '#e5e7eb', margin: '0 4px' }} />
-                          <IconBtn $color="#10b981" title="WhatsApp" onClick={() => handleWhatsApp(user.phone)}>
-                            <FiMessageCircle />
-                          </IconBtn>
-                          <IconBtn $color="#3b82f6" title="Call" onClick={() => handleCall(user.phone)}>
-                            <FiPhone />
-                          </IconBtn>
-                        </ActionButtons>
-                      )}
-                    </Td>
-                  </Tr>
-                );
-              })}
-            </tbody>
-          </Table>
-        )}
-      </ListCard>
-    </PageContainer>
+      </TableCard>
+    </Container>
   );
 }

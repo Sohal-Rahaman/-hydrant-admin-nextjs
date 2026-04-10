@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiX, FiPhone, FiMessageCircle, FiMail, FiBox, FiDollarSign, FiClock, FiUser, FiActivity, FiEdit3, FiSave, FiAlertCircle, FiCheck } from 'react-icons/fi';
-import { updateDocument } from '@/lib/firebase';
+import { updateDocument, Jar, subscribeToCollection } from '@/lib/firebase';
+import { where } from 'firebase/firestore';
 import { logActivity } from '@/lib/activityLogger';
 
 interface UserInsightDrawerProps {
@@ -31,12 +32,22 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle'|'success'|'error'>('idle');
 
+  const [heldJars, setHeldJars] = useState<Jar[]>([]);
+
   useEffect(() => {
     if (user) {
       setWalletBalance(user.wallet_balance ?? 0);
       setJarsOccupied(user.jars_occupied ?? user.jarHold ?? 0);
       setIsEditing(false);
       setSaveStatus('idle');
+      
+      const targetId = user.customerId || user.id;
+      const unsubscribe = subscribeToCollection('jars', (snapshot) => {
+        const jarsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Jar));
+        setHeldJars(jarsData);
+      }, [where('currentOwnerId', 'in', [user.id, user.customerId].filter(Boolean))]);
+      
+      return () => unsubscribe();
     }
   }, [user]);
 
@@ -257,6 +268,38 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
                 </div>
               </div>
 
+               {/* Held Jars List */}
+               <div className="flex flex-col gap-6 pt-4">
+                  <div className="text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] flex items-center gap-2">
+                     <FiBox className="text-cyan-400" /> Tracked Assets (Jars)
+                     <span className="text-cyan-400 ml-auto bg-cyan-400/10 px-2 py-0.5 rounded border border-cyan-400/20 shadow-[0_0_10px_rgba(34,211,238,0.2)]">{heldJars.length} HELD</span>
+                  </div>
+                  
+                  {heldJars.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      {heldJars.map(jar => {
+                        const lastScan = jar.lastScanAt?.toDate ? jar.lastScanAt.toDate() : new Date(jar.lastScanAt);
+                        const days = Math.floor((new Date().getTime() - lastScan.getTime()) / (1000 * 3600 * 24));
+                        return (
+                          <div key={jar.id} className="bg-zinc-950 p-4 rounded border border-zinc-800 flex flex-col justify-between hover:border-cyan-400/50 transition-colors group relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-8 h-8 bg-cyan-400/5 rounded-bl-full"></div>
+                            <div className="text-white font-mono text-[11px] font-bold z-10 relative">{jar.id}</div>
+                            <div className="flex justify-between items-end mt-4 z-10 relative">
+                               <div className="text-[9px] text-zinc-500 uppercase font-black tracking-widest bg-black px-1.5 py-0.5 rounded-sm border border-zinc-900">{days} Days</div>
+                               <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-[0_0_8px_rgba(34,211,238,0.5)] group-hover:animate-ping"></div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-6 flex flex-col items-center justify-center border border-dashed border-zinc-800 rounded bg-zinc-950/30">
+                      <div className="text-zinc-600 font-mono text-[10px] font-black uppercase tracking-widest">No Active Assets</div>
+                      <div className="text-zinc-700 text-[10px] mt-2 font-mono">This operational asset holds 0 inventory units.</div>
+                    </div>
+                  )}
+               </div>
+
             </div>
 
             {/* Footer / Authority Check */}
@@ -268,6 +311,8 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
                      <span className="text-[8px] text-lime-400 font-mono font-bold">SECURE_UPLINK_READY</span>
                   </div>
                </div>
+
+
             </div>
           </motion.div>
         </>

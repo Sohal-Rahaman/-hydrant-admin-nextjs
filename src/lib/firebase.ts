@@ -1,7 +1,7 @@
 // Firebase configuration and initialization for Next.js
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, signOut, RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
-import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, QuerySnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
+import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, setDoc, deleteDoc, onSnapshot, query, where, orderBy, QuerySnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { deleteUser as firebaseDeleteUser } from 'firebase/auth';
 
@@ -166,6 +166,100 @@ export interface StaffMember {
   createdAt: any;
   addedBy?: string;
 }
+
+export interface Jar {
+  id: string; // e.g. HYD-JAR-0001
+  currentOwnerId: string | null;
+  status: 'available' | 'locked' | 'lost' | 'maintenance';
+  lastScanAt: any;
+  lastScanBy?: string;
+  history: Array<{
+    customerId: string;
+    timestamp: any;
+    action: 'delivery' | 'pickup';
+  }>;
+}
+
+export const assignJarToCustomer = async (jarId: string, customerId: string, staffId: string) => {
+  const jarRef = doc(db, 'jars', jarId);
+  const jarDoc = await getDoc(jarRef);
+  
+  if (jarDoc.exists()) {
+    const data = jarDoc.data() as Jar;
+    if (data.status === 'locked' && data.currentOwnerId !== customerId) {
+      throw new Error(`Jar ${jarId} is already locked to a customer. It must be returned first.`);
+    }
+    
+    await updateDoc(jarRef, {
+      currentOwnerId: customerId,
+      status: 'locked',
+      lastScanAt: new Date(),
+      lastScanBy: staffId,
+      history: [
+        ...(data.history || []),
+        {
+          customerId,
+          timestamp: new Date(),
+          action: 'delivery'
+        }
+      ]
+    });
+  } else {
+    // If the jar was never registered in the system before, register it now.
+    await setDoc(jarRef, {
+      id: jarId,
+      currentOwnerId: customerId,
+      status: 'locked',
+      lastScanAt: new Date(),
+      lastScanBy: staffId,
+      history: [
+        {
+          customerId,
+          timestamp: new Date(),
+          action: 'delivery'
+        }
+      ]
+    });
+  }
+};
+
+export const returnJar = async (jarId: string, staffId: string, customerId?: string) => {
+  const jarRef = doc(db, 'jars', jarId);
+  const jarDoc = await getDoc(jarRef);
+  
+  if (jarDoc.exists()) {
+    const data = jarDoc.data() as Jar;
+    await updateDoc(jarRef, {
+      currentOwnerId: null,
+      status: 'available',
+      lastScanAt: new Date(),
+      lastScanBy: staffId,
+      history: [
+        ...(data.history || []),
+        {
+          customerId: customerId || data.currentOwnerId || 'unknown',
+          timestamp: new Date(),
+          action: 'pickup'
+        }
+      ]
+    });
+  } else {
+    await setDoc(jarRef, {
+      id: jarId,
+      currentOwnerId: null,
+      status: 'available',
+      lastScanAt: new Date(),
+      lastScanBy: staffId,
+      history: [
+        {
+          customerId: customerId || 'unknown',
+          timestamp: new Date(),
+          action: 'pickup'
+        }
+      ]
+    });
+  }
+};
 
 export const getAdminDataByPhone = async (phone: string): Promise<StaffMember | null> => {
   try {

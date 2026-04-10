@@ -11,7 +11,7 @@ import {
   FiPackage, FiTruck, FiMoon, FiDroplet, FiDownload,
   FiChevronUp, FiChevronDown, FiBarChart2, FiRefreshCcw, FiCalendar
 } from 'react-icons/fi';
-import { subscribeToCollection, updateDocument, db } from '@/lib/firebase';
+import { subscribeToCollection, updateDocument, db, assignJarToCustomer, returnJar } from '@/lib/firebase';
 import UserInsightDrawer from '@/components/UserInsightDrawer';
 import { normalizeOrderStatus } from '@/lib/orderStatus';
 import { collection, getDocs } from 'firebase/firestore';
@@ -542,6 +542,7 @@ export default function OrdersPage() {
   const searchParams = useSearchParams();
   const orderIdParam = searchParams.get('orderId');
   const router = useRouter();
+  const { currentUser: userAuth } = useAuth();
 
   /* URL param: jump to order */
   useEffect(() => {
@@ -751,19 +752,58 @@ export default function OrdersPage() {
     setProcessing(true);
     try {
       const user=getUserDetails(selectedOrder.userId);
-      const {deliveredJars,collectedJars,amountPaid,notes}=handoverData;
+      const { deliveredJars, collectedJars, deliveredJarIds, collectedJarIds, amountPaid, notes } = handoverData;
+      
+      const adminId = userAuth?.uid || 'admin_panel';
+      const actualCustomerId = user?.customerId || user?.id || selectedOrder.userId;
+
+      // 1. Process deliveries (Assign jars to customer)
+      if (deliveredJarIds && deliveredJarIds.length > 0) {
+        for (const jarId of deliveredJarIds) {
+          try {
+            await assignJarToCustomer(jarId, actualCustomerId, adminId);
+          } catch (e) {
+            console.warn(`Could not assign jar ${jarId}:`, e);
+          }
+        }
+      }
+
+      // 2. Process pickups (Return jars to warehouse)
+      if (collectedJarIds && collectedJarIds.length > 0) {
+        for (const jarId of collectedJarIds) {
+          try {
+            await returnJar(jarId, adminId, actualCustomerId);
+          } catch (e) {
+            console.warn(`Could not return jar ${jarId}:`, e);
+          }
+        }
+      }
+
       const unit=selectedOrder.amount/(selectedOrder.quantity||1);
       const newAmt=unit*deliveredJars;
       const already=(selectedOrder.paymentMethod!=='cash')?(selectedOrder.amount||0):0;
       const unpaid=(newAmt-already)-amountPaid;
       const netJars=deliveredJars-collectedJars;
+
       await updateDocument('orders',selectedOrder.id,{
         status:'completed',deliveredAt:new Date(),
-        handover:{deliveredJars,collectedJars,netChange:netJars,completedAt:new Date(),notes,amountPaid},
+        handover:{
+          deliveredJars,collectedJars,netChange:netJars,completedAt:new Date(),
+          notes,amountPaid,
+          deliveredJarIds: deliveredJarIds || [],
+          collectedJarIds: collectedJarIds || []
+        },
         amount:newAmt,
       });
+
       if(user) await updateDocument('users',user.id,{wallet_balance:(user.wallet_balance||0)-unpaid,jars_occupied:(user.jars_occupied||0)+netJars});
-      await logActivity({action:'ORDER_DELIVERED',actor:'ADMIN',actorName:'Admin',actorId:'admin_panel',details:`Order #${selectedOrder.id} delivered`,targetId:selectedOrder.id});
+      
+      await logActivity({
+        action:'ORDER_DELIVERED',actor:'ADMIN',actorName:'Admin',actorId:adminId,
+        details:`Order #${selectedOrder.id} delivered. Scanned ${deliveredJarIds?.length || 0} delivered, ${collectedJarIds?.length || 0} collected.`,
+        targetId:selectedOrder.id
+      });
+
     } catch(e){console.error(e);alert('Failed to update order');}
     finally { setProcessing(false); }
   };
@@ -1552,6 +1592,7 @@ export default function OrdersPage() {
         {showModal&&selectedOrder&&(
           <DeliveryHandoverModal
             order={selectedOrder}
+            walletBalance={getUserDetails(selectedOrder.userId)?.wallet_balance ?? 0}
             onClose={()=>setShowModal(false)}
             onComplete={handleMarkDelivered}
             processing={processing}
