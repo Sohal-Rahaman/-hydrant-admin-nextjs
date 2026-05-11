@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, ReactNode } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -32,7 +32,8 @@ import {
   FiGift,
   FiLink,
   FiGrid,
-  FiLock
+  FiLock,
+  FiSlash
 } from 'react-icons/fi';
 import { useAuth } from '@/context/AuthContext';
 
@@ -357,30 +358,42 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const { userData, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const navigationItems = [
-    { path: '/admin', label: 'Dashboard', icon: FiHome, permission: 'all' },
-    { path: '/admin/orders', label: 'Orders', icon: FiPackage, permission: 'orders' },
-    { path: '/admin/create-order', label: 'Create Order', icon: FiShoppingCart, permission: 'orders' },
-    { path: '/admin/users', label: 'Users', icon: FiUsers, permission: 'crm' },
-    { path: '/admin/users?mode=fleet', label: 'Fleet Board', icon: FiGrid, permission: 'fleet' },
-    { path: '/admin/crm', label: 'CRM & Leads', icon: FiBriefcase, permission: 'crm' },
-    { path: '/admin/subscriptions', label: 'Subscriptions', icon: FiRepeat, permission: 'orders' },
-    { path: '/admin/wallet', label: 'Wallet Mgmt', icon: FiCreditCard, permission: 'wallet' },
-    { path: '/admin/referrals', label: 'Referrals', icon: FiGift, permission: 'marketing' },
-    { path: '/admin/jars', label: 'Jar Holdings', icon: FiArchive, permission: 'inventory' },
-    { path: '/admin/trials', label: 'Trial Customers', icon: FiFlag, permission: 'orders' },
-    { path: '/admin/dues', label: 'Due Amounts', icon: FiAlertCircle, permission: 'wallet' },
-    { path: '/admin/expenses', label: 'Expenses', icon: FiDollarSign, permission: 'wallet' },
-    { path: '/admin/army', label: 'Army Management', icon: FiTruck, permission: 'fleet' },
-    { path: '/admin/support', label: 'Support Tickets', icon: FiMessageSquare, permission: 'support' },
-    { path: '/admin/admins', label: 'Manage Roles', icon: FiLock, permission: 'staff' },
-    { path: '/admin/coupons', label: 'Coupons', icon: FiTag, permission: 'marketing' },
-    { path: '/admin/activity', label: 'Activity Log', icon: FiActivity, permission: 'staff' },
-    { path: '/admin/notifications', label: 'Notifications', icon: FiBell, permission: 'all' },
-    { path: '/admin/deletion-requests', label: 'Deletion Requests', icon: FiUserX, permission: 'staff' },
-    { path: '/admin/delivery', label: 'Delivery Map', icon: FiMapPin, permission: 'fleet' },
-    { path: '/admin/analytics', label: 'Analytics', icon: FiBarChart, permission: 'analytics' },
-    { path: '/admin/settings/integrations', label: 'App Integrations', icon: FiLink, permission: 'all' },
+    { path: '/admin', label: 'Dashboard', icon: FiHome, permission: 'all', category: 'MAIN' },
+    
+    // APP USERS SECTION
+    { path: '/admin/users', label: 'All Users', icon: FiUsers, permission: 'crm', category: 'APP USERS' },
+    { path: '/admin/users?filter=never_ordered', label: 'Never Ordered', icon: FiUserX, permission: 'crm', category: 'APP USERS' },
+    { path: '/admin/users?filter=inactive', label: 'Inactive Users', icon: FiSlash, permission: 'crm', category: 'APP USERS' },
+    
+    // CUSTOMERS SECTION
+    { path: '/admin/users?filter=all_customers', label: 'All Customers', icon: FiUsers, permission: 'crm', category: 'CUSTOMERS' },
+    { path: '/admin/users?status=FREE_CUSTOMER', label: 'Legacy Customers', icon: FiPackage, permission: 'crm', category: 'CUSTOMERS' },
+    { path: '/admin/users?status=DEPOSIT_CUSTOMER', label: 'Deposit Customers', icon: FiCreditCard, permission: 'crm', category: 'CUSTOMERS' },
+    { path: '/admin/users?status=PRO_CUSTOMER', label: 'PRO Customers', icon: FiShield, permission: 'orders', category: 'CUSTOMERS' },
+    
+    // OPERATIONS
+    { path: '/admin/orders', label: 'Live Orders', icon: FiPackage, permission: 'orders', category: 'OPERATIONS' },
+    { path: '/admin/users?mode=fleet', label: 'Fleet Board', icon: FiGrid, permission: 'fleet', category: 'OPERATIONS' },
+    { path: '/admin/jars', label: 'Jar Holdings', icon: FiArchive, permission: 'inventory', category: 'OPERATIONS' },
+    { path: '/admin/army', label: 'Army Management', icon: FiTruck, permission: 'fleet', category: 'OPERATIONS' },
+    { path: '/admin/delivery', label: 'Delivery Map', icon: FiMapPin, permission: 'fleet', category: 'OPERATIONS' },
+    
+    // BUSINESS
+    { path: '/admin/crm', label: 'CRM & Leads', icon: FiBriefcase, permission: 'crm', category: 'BUSINESS' },
+    { path: '/admin/pro-control', label: 'PRO Control Center', icon: FiShield, permission: 'orders', category: 'BUSINESS' },
+    { path: '/admin/wallet', label: 'Wallet Mgmt', icon: FiCreditCard, permission: 'wallet', category: 'BUSINESS' },
+    { path: '/admin/referrals', label: 'Referrals', icon: FiGift, permission: 'marketing', category: 'BUSINESS' },
+    { path: '/admin/coupons', label: 'Coupons', icon: FiTag, permission: 'marketing', category: 'BUSINESS' },
+    { path: '/admin/expenses', label: 'Expenses', icon: FiDollarSign, permission: 'wallet', category: 'BUSINESS' },
+    
+    // SYSTEM
+    { path: '/admin/support', label: 'Support Tickets', icon: FiMessageSquare, permission: 'support', category: 'SYSTEM' },
+    { path: '/admin/admins', label: 'Manage Roles', icon: FiLock, permission: 'staff', category: 'SYSTEM' },
+    { path: '/admin/analytics', label: 'Analytics', icon: FiBarChart, permission: 'analytics', category: 'SYSTEM' },
+    { path: '/admin/activity', label: 'Activity Log', icon: FiActivity, permission: 'staff', category: 'SYSTEM' },
+    { path: '/admin/notifications', label: 'Notifications', icon: FiBell, permission: 'all', category: 'SYSTEM' },
   ];
 
   const { permissions = [], role } = useAuth();
@@ -465,18 +478,38 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         </SidebarHeader>
 
         <NavMenu>
-          {filteredNavigationItems.map((item) => (
-            <NavItem
-              key={item.path}
-              $active={pathname === item.path}
-              onClick={() => handleNavClick(item.path)}
-              onKeyDown={(e) => handleNavKeyPress(e, item.path)}
-              type="button"
-              tabIndex={0}
-            >
-              <item.icon />
-              {item.label}
-            </NavItem>
+          {Array.from(new Set(filteredNavigationItems.map(i => i.category))).map(cat => (
+            <React.Fragment key={cat}>
+              {cat !== 'MAIN' && (
+                <div style={{ 
+                  padding: '16px 20px 8px', 
+                  fontSize: '9px', 
+                  fontWeight: 800, 
+                  color: 'var(--color-text-tertiary)', 
+                  textTransform: 'uppercase', 
+                  letterSpacing: '0.1em' 
+                }}>
+                  {cat}
+                </div>
+              )}
+              {filteredNavigationItems.filter(i => i.category === cat).map((item) => (
+                <NavItem
+                  key={item.path}
+                  $active={
+                    item.path.includes('?') 
+                      ? (pathname + '?' + searchParams.toString() === item.path)
+                      : (pathname === item.path && !searchParams.toString())
+                  }
+                  onClick={() => handleNavClick(item.path)}
+                  onKeyDown={(e) => handleNavKeyPress(e, item.path)}
+                  type="button"
+                  tabIndex={0}
+                >
+                  <item.icon />
+                  {item.label}
+                </NavItem>
+              ))}
+            </React.Fragment>
           ))}
         </NavMenu>
 

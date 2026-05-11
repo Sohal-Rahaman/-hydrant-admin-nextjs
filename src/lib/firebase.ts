@@ -1,8 +1,9 @@
 // Firebase configuration and initialization for Next.js
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, signOut, RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
-import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, setDoc, deleteDoc, onSnapshot, query, where, orderBy, QuerySnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
+import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, setDoc, deleteDoc, onSnapshot, query, where, orderBy, QuerySnapshot, DocumentData, QueryConstraint, runTransaction } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getDatabase, ref, onValue, set as setRtdb, update as updateRtdb } from 'firebase/database';
 import { deleteUser as firebaseDeleteUser } from 'firebase/auth';
 
 const firebaseConfig = {
@@ -11,7 +12,8 @@ const firebaseConfig = {
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL
 };
 
 // Initialize Firebase only if API key is present (to avoid build-time errors)
@@ -31,6 +33,7 @@ try {
 // Initialize Firebase services
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const rtdb = getDatabase(app);
 export const functions = getFunctions(app);
 
 
@@ -68,11 +71,15 @@ export const markOrderAsCompleted = httpsCallable(functions, 'markOrderAsComplet
 export const triggerSubscriptionOrders = httpsCallable(functions, 'triggerSubscriptionOrders');
 export const getDeliveryAnalytics = httpsCallable(functions, 'getDeliveryAnalytics');
 export const placeNewOrder = httpsCallable(functions, 'placeNewOrder');
+export const enrollPro = httpsCallable(functions, 'enrollPro');
+export const syncUserAuthDetails = httpsCallable(functions, 'syncUserAuthDetails');
+export const adminManualEnrollPro = httpsCallable(functions, 'adminManualEnrollPro');
 
 // Firestore helper functions
 export const getCollection = (collectionName: string) => collection(db, collectionName);
 export const getDocument = (collectionName: string, docId: string) => doc(db, collectionName, docId);
 export const addDocument = (collectionName: string, data: DocumentData) => addDoc(collection(db, collectionName), data);
+export const setDocument = (collectionName: string, docId: string, data: Partial<DocumentData>) => setDoc(doc(db, collectionName, docId), data, { merge: true });
 export const updateDocument = (collectionName: string, docId: string, data: Partial<DocumentData>) => updateDoc(doc(db, collectionName, docId), data);
 export const deleteDocument = (collectionName: string, docId: string) => deleteDoc(doc(db, collectionName, docId));
 
@@ -108,6 +115,36 @@ export const subscribeToCollection = (
   );
 };
 
+// ─── REALTIME DATABASE HELPERS ──────────────────────────────────────────────
+
+/**
+ * Subscribe to live order status from RTDB (high-frequency)
+ */
+export const subscribeToLiveStatus = (
+  orderId: string, 
+  callback: (data: any) => void
+) => {
+  const statusRef = ref(rtdb, `orders/status/${orderId}`);
+  return onValue(statusRef, (snapshot) => {
+    if (snapshot.exists()) {
+      callback(snapshot.val());
+    }
+  });
+};
+
+/**
+ * Update live tracking location for an order
+ */
+export const updateOrderTracking = (
+  orderId: string, 
+  location: { lat: number; lng: number }
+) => {
+  return setRtdb(ref(rtdb, `tracking/${orderId}`), {
+    ...location,
+    updatedAt: Date.now()
+  });
+};
+
 // Specific data fetchers
 export const getUserData = async (uid: string) => {
   try {
@@ -139,6 +176,13 @@ export interface User {
   phone?: string;
   email?: string;
   customerId?: string;
+  isLegacy?: boolean;
+  proTrialEnd?: any;
+  proStatus?: 'trial' | 'active' | 'expired' | 'cancelled';
+  proPlanId?: 'lite' | 'pro' | 'proMax' | null;
+  proPeriodEnd?: any;
+  proJarsUsedThisMonth?: number;
+  walletBalance?: number;
   [key: string]: any;
 }
 
@@ -430,21 +474,95 @@ export const generateSmartCoordinates = (pincode: string, orderNumber: number): 
   };
 };
 
-// Generate unique customer ID
-export const generateCustomerId = () => {
-  const timestamp = Date.now().toString();
-  const randomNum = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  return `HYD-${timestamp.slice(-6)}-${randomNum}`;
+// Generate unique customer ID (format: HYDRA-1001, 1002...)
+export const generateCustomerId = async () => {
+  const counterRef = doc(db, 'counters', 'customers');
+  const nextNumber = await runTransaction(db, async (transaction) => {
+    const counterSnap = await transaction.get(counterRef);
+    let num = 1001;
+    if (counterSnap.exists()) {
+      num = (counterSnap.data().lastNumber || 1000) + 1;
+      transaction.update(counterRef, { lastNumber: num });
+    } else {
+      transaction.set(counterRef, { lastNumber: num });
+    }
+    return num;
+  });
+  return `HYDRA-${nextNumber}`;
+};
+
+// Generate unique Pro ID (format: HYR-PRO-PLAN-1234)
+export const generateProId = (planId: string, customerId: string = '') => {
+  const planCode = planId.toUpperCase();
+  const num = customerId ? customerId.split('-').pop() : Math.floor(Math.random() * 9000 + 1000).toString();
+  return `HYR-PRO-${planCode}-${num}`;
 };
 
 // Ensure user has customer ID
 export const ensureCustomerId = async (userId: string, userData: DocumentData) => {
   if (!userData.customerId) {
-    const customerId = generateCustomerId();
+    const customerId = await generateCustomerId();
     await updateDocument('users', userId, { customerId });
     return customerId;
   }
   return userData.customerId;
+};
+
+// ─── USER DATA NORMALIZATION ────────────────────────────────────────────────
+// Resolves mismatches between full_name, name, phoneNumber, phone, etc.
+export const normalizeUser = (user: any) => {
+  if (!user) return null;
+  
+  const id = user.id || user.uid || '';
+  const customerId = user.customerId || id;
+  
+  // Name Priority: full_name -> name -> displayName -> firstName+lastName -> Unknown
+  const displayName = (
+    user.full_name || 
+    user.name || 
+    user.displayName || 
+    `${user.firstName || ''} ${user.lastName || ''}`.trim() || 
+    'Unknown Customer'
+  );
+
+  // Phone Priority: phone -> phoneNumber -> N/A
+  const phone = user.phone || user.phoneNumber || 'N/A';
+  const alt_phone = user.alt_phone || user.altPhone || '';
+  
+  // DOB & Gender
+  const dob = user.dob || user.dateOfBirth || '';
+  const gender = user.gender || '';
+  
+  // Wallet Priority: wallet_balance -> walletBalance -> 0
+  const wallet_balance = user.wallet_balance ?? user.walletBalance ?? 0;
+  
+  // Assets Priority: jars_occupied -> jarHold -> 0
+  const jars_occupied = user.jars_occupied ?? user.jarHold ?? user.occupiedJars ?? 0;
+
+  return {
+    ...user,
+    id,
+    customerId,
+    displayName,
+    displayPhone: phone,
+    displayAltPhone: alt_phone,
+    displayEmail: user.email || 'N/A',
+    displayDob: dob,
+    displayGender: gender,
+    walletBalance: wallet_balance,
+    jarsOccupied: jars_occupied,
+    // Standardize to snake_case for consistency with Android app
+    full_name: displayName,
+    phone: phone,
+    alt_phone: alt_phone,
+    dob,
+    gender,
+    wallet_balance,
+    jars_occupied,
+    // Keep legacy camelCase if needed elsewhere
+    phoneNumber: phone,
+    walletBalanceLegacy: wallet_balance,
+  };
 };
 
 export default app;

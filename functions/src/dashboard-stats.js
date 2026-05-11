@@ -1,12 +1,9 @@
-const functions = require('firebase-functions');
+const functions = require('firebase-functions/v1');
+const { onDocumentWritten } = require('firebase-functions/v2/firestore');
 const admin = require('firebase-admin');
 
 // Initialize Firebase Admin SDK if not already initialized
-if (!admin.apps.length) {
-  admin.initializeApp();
-}
-
-const db = admin.firestore();
+// initialization moved inside functions
 
 // Align with iOS User App - HYDRANT_ALIGNMENT.md
 function normalizeOrderStatus(raw) {
@@ -25,6 +22,7 @@ function isOpenOrderStatus(status) {
 
 // Function to update dashboard stats
 async function updateDashboardStats() {
+  const db = admin.firestore();
   try {
     console.log('🔄 Updating dashboard stats...');
     
@@ -149,6 +147,7 @@ exports.updateDashboardStats = functions.https.onRequest(async (req, res) => {
 
 // Function to initialize dashboard stats document
 exports.initializeDashboardStats = functions.https.onRequest(async (req, res) => {
+  const db = admin.firestore();
   try {
     const dashboardStatsRef = db.collection('dashboard_stats').doc('live_metrics');
     
@@ -179,20 +178,16 @@ exports.initializeDashboardStats = functions.https.onRequest(async (req, res) =>
   }
 });
 
-// Function to update dashboard stats when orders change
-exports.onOrderUpdate = functions.firestore
-  .document('orders/{orderId}')
-  .onWrite(async (change, context) => {
-    console.log('🔄 Order changed, updating dashboard stats...');
-    await updateDashboardStats();
-  });
+// Function to update dashboard stats when orders change (Gen 2)
+exports.onOrderUpdate = onDocumentWritten({ document: 'orders/{orderId}', region: 'us-central1' }, async (event) => {
+  console.log('🔄 Order changed, updating dashboard stats...');
+  await updateDashboardStats();
+});
 
-// Function to update dashboard stats when users change
-exports.onUserUpdate = functions.firestore
-  .document('users/{userId}')
-  .onWrite(async (change, context) => {
-    console.log('🔄 User changed, updating dashboard stats...');
-    await updateDashboardStats();
-  });
+// Function to update dashboard stats when users change (Gen 2)
+exports.onUserUpdate = onDocumentWritten({ document: 'users/{userId}', region: 'us-central1' }, async (event) => {
+  console.log('🔄 User changed, updating dashboard stats...');
+  await updateDashboardStats();
+});
 
 module.exports = { updateDashboardStats };

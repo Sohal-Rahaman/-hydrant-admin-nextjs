@@ -82,5 +82,22 @@ service cloud.firestore {
     match /admin_notifications/{document} {
       allow read, write, update, delete, list: if isAdmin();
     }
+    
+    // Pro Model: Jars collection - admins have full access
+    match /jars/{jarId} {
+      allow read, write, update, delete, list: if isAdmin();
+    }
+    
+    // Pro Model: Pro Plans collection - readable by all, writable by admins
+    match /proPlans/{planId} {
+      allow read: if request.auth != null || true; // Public or authenticated can read plans
+      allow write, update, delete: if isAdmin();
+    }
+    
+    // Pro Model: Pro Memberships collection - users can read their own, admins full access
+    match /pro_memberships/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow write, update, delete: if isAdmin();
+    }
   }
 }

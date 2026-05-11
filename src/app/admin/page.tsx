@@ -15,7 +15,8 @@ import {
   FiCalendar,
   FiClock,
   FiInfo,
-  FiUser
+  FiUser,
+  FiShield
 } from 'react-icons/fi';
 import { 
   subscribeToCollection, 
@@ -376,7 +377,9 @@ export default function AdminDashboard() {
     totalRevenue: 0,
     expressCount: 0,
     subscriptionCount: 0,
-    normalCount: 0
+    normalCount: 0,
+    proMembersCount: 0,
+    proTrialCount: 0
   });
 
   const [chartData, setChartData] = useState<{
@@ -545,7 +548,9 @@ const toDate = (dateValue: any): Date => {
             totalRevenue: liveStats.totalRevenue || 0,
             expressCount: liveStats.expressCount || 0,
             subscriptionCount: liveStats.subscriptionCount || 0,
-            normalCount: liveStats.normalCount || 0
+            normalCount: liveStats.normalCount || 0,
+            proMembersCount: liveStats.proMembersCount || 0,
+            proTrialCount: liveStats.proTrialCount || 0
           });
           
           console.log('✅ Stats updated successfully with values:', {
@@ -721,6 +726,21 @@ const toDate = (dateValue: any): Date => {
       }
     });
 
+    // Subscribe to pro_memberships collection
+    const unsubscribePro = subscribeToCollection('pro_memberships', (snapshot) => {
+      try {
+        const activeCount = snapshot.docs.filter(d => d.data().proStatus === 'active').length;
+        const trialCount = snapshot.docs.filter(d => d.data().proStatus === 'trial').length;
+        setStats(prev => ({
+          ...prev,
+          proMembersCount: activeCount,
+          proTrialCount: trialCount
+        }));
+      } catch (error) {
+        console.error('Error processing pro_memberships:', error);
+      }
+    });
+
     // Set loading to false after initial data load
     const timer = setTimeout(() => {
       setLoading(false);
@@ -731,6 +751,7 @@ const toDate = (dateValue: any): Date => {
       unsubscribeOrders();
       unsubscribeUsers();
       unsubscribeSubscriptions();
+      unsubscribePro();
       clearTimeout(timer);
     };
   }, []);
@@ -1135,8 +1156,8 @@ Check console for detailed logs`);
         </StatCard>
 
         <StatCard
-          color="linear-gradient(135deg, #ec4899 0%, #be185d 100%)"
-          initial={{ opacity: 0, y: 20 }}
+          color="var(--color-accent-pink)"
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
@@ -1149,8 +1170,8 @@ Check console for detailed logs`);
                 All registered users
               </StatTrend>
             </div>
-            <StatIcon color="linear-gradient(135deg, #ec4899 0%, #be185d 100%)">
-              <FiUsers />
+            <StatIcon color="#be185d">
+              <FiUser />
             </StatIcon>
           </StatHeader>
         </StatCard>
@@ -1163,8 +1184,30 @@ Check console for detailed logs`);
         >
           <StatHeader>
             <div>
+              <StatValue>{stats.proMembersCount}</StatValue>
+              <StatLabel>Active Pro Members</StatLabel>
+              <StatTrend>
+                <span style={{ fontSize: '0.7rem', background: '#dcfce7', color: '#16a34a', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                  ⚡ {stats.proTrialCount} in Trial
+                </span>
+              </StatTrend>
+            </div>
+            <StatIcon color="#10b981">
+              <FiShield />
+            </StatIcon>
+          </StatHeader>
+        </StatCard>
+
+        <StatCard
+          color="var(--color-accent-green)"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.7 }}
+        >
+          <StatHeader>
+            <div>
               <StatValue>₹{stats.totalRevenue}</StatValue>
-              <StatLabel>Total Revenue</StatLabel>
+              <StatLabel>All-Time Revenue</StatLabel>
               <StatTrend>
                 <FiDollarSign />
                 All completed orders × ₹37

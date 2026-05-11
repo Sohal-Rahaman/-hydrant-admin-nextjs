@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import styled, { keyframes, css } from 'styled-components';
@@ -11,20 +11,23 @@ import {
   FiPackage, FiTruck, FiMoon, FiDroplet, FiDownload,
   FiChevronUp, FiChevronDown, FiBarChart2, FiRefreshCcw, FiCalendar
 } from 'react-icons/fi';
-import { subscribeToCollection, updateDocument, db, assignJarToCustomer, returnJar } from '@/lib/firebase';
+import { subscribeToCollection, updateDocument, db, assignJarToCustomer, returnJar, subscribeToLiveStatus } from '@/lib/firebase';
 import UserInsightDrawer from '@/components/UserInsightDrawer';
 import { normalizeOrderStatus } from '@/lib/orderStatus';
 import { collection, getDocs } from 'firebase/firestore';
 import { logActivity } from '@/lib/activityLogger';
 import { useAuth } from '@/context/AuthContext';
 import { DeliveryHandoverModal } from '@/components/DeliveryHandoverModal';
+import { DeliveryMap } from '@/components/DeliveryMap';
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface Order {
   id: string; userId: string; userName?: string; userPhone?: string;
+  customerName?: string;
   status: 'pending'|'processing'|'completed'|'cancelled'|'canceled'|'placed'|'confirmed'|'in_progress'|'out_for_delivery'|'delivered';
   quantity: number; amount: number;
-  address: { street: string; city: string; pincode: string; full?: string };
+  address?: { street: string; city: string; pincode: string; full?: string };
+  deliveryAddress?: { id?: string; type?: string; fullAddress?: string; address_line?: string; latitude?: number; longitude?: number };
   createdAt: Date|{toDate():Date}|string;
   orderType: 'regular'|'subscription';
   deliverySlot?: string; deliveryDate?: string|Date|{toDate():Date}|null;
@@ -43,6 +46,10 @@ interface User { id:string; name:string; phoneNumber:string; wallet_balance:numb
 interface ArmyMember { id:string; name:string; phoneNumber:string; isOnline:boolean; activeOrdersCount:number }
 
 /* ── Helpers ────────────────────────────────────────────────── */
+const getName = (order: Order, user?: any): string => {
+  return user?.name || user?.full_name || order.customerName || order.userName || 'Customer';
+};
+
 const getTs = (d:any):number => {
   try {
     if (!d) return 0;
@@ -52,6 +59,27 @@ const getTs = (d:any):number => {
     return 0;
   } catch { return 0; }
 };
+
+const fmt = (d?: { toDate(): Date } | Date | string | null) => {
+  if (!d) return '—';
+  try {
+    const dt = typeof d === 'object' && 'toDate' in d ? d.toDate() : new Date(d as string | Date);
+    return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch { return '—'; }
+};
+
+const dist = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+const WAREHOUSE = { lat: 22.6362, lng: 88.4299 };
 
 const timeAgo = (d:any):string => {
   const ms = Date.now() - getTs(d);
@@ -316,6 +344,20 @@ const Tag = styled.div<{ $clr?: string }>`
   border: 1px solid ${p => p.$clr ? `${p.$clr}30` : 'var(--color-border-primary)'};
 `;
 
+const LiveDot = styled.div`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10B981;
+  box-shadow: 0 0 0 rgba(16, 185, 129, 0.4);
+  animation: pulse-live 2s infinite;
+  @keyframes pulse-live {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+  }
+`;
+
 const PBar = styled.div`height:3px;background:#1a1a1a;border-radius:2px;margin-bottom:10px;overflow:hidden`;
 const PFill = styled.div<{$w:number;$clr:string}>`
   height:100%;width:${p=>p.$w}%;background:${p=>p.$clr};border-radius:2px;transition:width .4s
@@ -363,19 +405,156 @@ const PSel = styled.select`
 `;
 
 /* ── Slot section headers ── */
-const SlotSection = styled.div`padding:0 16px;@media(min-width:1024px){display:none}`;
-const SlotHead = styled.div<{$clr:string}>`
-  display:flex;align-items:center;gap:8px;padding:14px 0 10px;
-  .icon{color:${p=>p.$clr};flex-shrink:0}
-  .txt{font-size:12px;font-weight:800;color:${p=>p.$clr};text-transform:uppercase;letter-spacing:.6px}
-  .badge{
-    background:${p=>p.$clr}22;color:${p=>p.$clr};border:1px solid ${p=>p.$clr}44;
-    border-radius:8px;padding:2px 8px;font-size:11px;font-weight:800
-  }
-  .ln{flex:1;height:1px;background:${p=>p.$clr}1a}
+
+const MobileViewContainer = styled.div`
+  @media(min-width:1024px){display:none}
+  background: #F8FBFB;
+  min-height: 100vh;
+  color: #1A1A1A;
 `;
 
-const MobileFeed = styled.div`@media(min-width:1024px){display:none}`;
+const MobStatusBar = styled.div`
+  background: #0F6E56;
+  color: #E1F5EE;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  position: sticky;
+  top: 0;
+  z-index: 200;
+`;
+
+const MobTopBar = styled.div`
+  background: #0F6E56;
+  color: #E1F5EE;
+  padding: 10px 16px 14px;
+  position: sticky;
+  top: 25px;
+  z-index: 150;
+`;
+
+const MobTopBarRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+`;
+
+const MobStatsRow = styled.div`
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 2px;
+`;
+
+const MobStatPill = styled.div`
+  background: rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 6px 8px;
+  text-align: center;
+  .val { font-size: 15px; font-weight: 700; color: #fff; line-height: 1.2; }
+  .lbl { font-size: 8px; color: #9FE1CB; margin-top: 1px; text-transform: uppercase; font-weight: 800; letter-spacing: 0.3px; }
+`;
+
+const MobViewTabs = styled.div`
+  display: flex;
+  border-bottom: 1px solid #E2E8F0;
+  background: #ffffff;
+  position: sticky;
+  top: 130px;
+  z-index: 100;
+`;
+
+const MobViewTab = styled.button<{ $active: boolean }>`
+  flex: 1;
+  text-align: center;
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: ${p => p.$active ? '#0F6E56' : 'var(--color-text-tertiary)'};
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  border-bottom: 2px solid ${p => p.$active ? '#0F6E56' : 'transparent'};
+  transition: all 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
+
+const MobContent = styled.div`
+  padding: 12px;
+  background: #F1F5F9;
+  min-height: 80vh;
+`;
+
+const MobSummaryStrip = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+`;
+
+const MobSumCard = styled.div<{ $clr: string }>`
+  flex: 1;
+  background: #ffffff;
+  border-radius: var(--radius-technical);
+  border: 1px solid #E2E8F0;
+  padding: 10px 8px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  .val { font-size: 20px; font-weight: 800; color: ${p => p.$clr}; font-family: 'Fira Code', monospace; }
+  .lbl { font-size: 9px; color: #64748B; margin-top: 2px; text-transform: uppercase; font-weight: 700; }
+`;
+
+const MobSeqBadge = styled.div<{ $status: 'active' | 'next' | 'std' }>`
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  flex-shrink: 0;
+  margin-right: 12px;
+  font-family: 'Fira Code', monospace;
+  ${p => p.$status === 'active' && 'background: #0F6E56; color: #E1F5EE; box-shadow: 0 0 10px rgba(15,110,86,0.2);'}
+  ${p => p.$status === 'next' && 'background: #E1F5EE; color: #0F6E56; border: 1px solid #0F6E56;'}
+  ${p => p.$status === 'std' && 'background: #EDF2F7; color: #4A5568;'}
+`;
+
+const MobOrderCard = styled.div<{ $active?: boolean }>`
+  background: #ffffff;
+  border-radius: var(--radius-technical);
+  border: 1px solid ${p => p.$active ? '#0F6E56' : '#E2E8F0'};
+  padding: 12px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  ${p => p.$active && 'box-shadow: 0 4px 12px rgba(15,110,86,0.1); border-left: 4px solid #0F6E56;'}
+`;
+
+const MobDivider = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 12px;
+  span {
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
+  &::before, &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--color-border-primary);
+  }
+`;
 
 /* ── Kanban (desktop) ── */
 const KanbanBoard = styled.div`
@@ -510,6 +689,32 @@ const SpinWrap = styled.div`
   svg{animation:${spin} 1s linear infinite;color:#10B981}
 `;
 
+/* ── Live Status Badge ── */
+const LiveStatusBadge = ({ orderId, initialStatus }: { orderId: string; initialStatus: string }) => {
+  const [liveStatus, setLiveStatus] = useState(initialStatus);
+  const [isLive, setIsLive] = useState(false);
+
+  useEffect(() => {
+    const unsub = subscribeToLiveStatus(orderId, (data) => {
+      if (data && data.status) {
+        setLiveStatus(data.status);
+        setIsLive(true);
+      }
+    });
+    return () => unsub();
+  }, [orderId]);
+
+  const clr = STATUS_COLOR[liveStatus] || STATUS_COLOR.pending;
+  const lbl = STATUS_LABEL[liveStatus] || liveStatus;
+
+  return (
+    <Tag $clr={clr}>
+      {isLive && <LiveDot style={{ marginRight: 6, width: 6, height: 6 }} />}
+      {lbl}
+    </Tag>
+  );
+};
+
 /* ════════════════════════════════════════════════════════════
    COMPONENT
 ════════════════════════════════════════════════════════════ */
@@ -523,7 +728,7 @@ export default function OrdersPage() {
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'open'|'completed'|'cancelled'|'statement'>('open');
+  const [activeTab, setActiveTab] = useState<'open'|'completed'|'cancelled'|'statement'|'logistics'>('open');
   // Statement tab state
   const [stmtRange, setStmtRange] = useState<'today'|'yesterday'|'week'|'month'|'year'|'custom'>('month');
   const [stmtFrom, setStmtFrom] = useState('');
@@ -539,10 +744,52 @@ export default function OrdersPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedUserForDrawer, setSelectedUserForDrawer] = useState<any>(null);
   const [isUserDrawerOpen, setIsUserDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<'queue'|'map'|'done'>('queue');
   const searchParams = useSearchParams();
   const orderIdParam = searchParams.get('orderId');
   const router = useRouter();
   const { currentUser: userAuth } = useAuth();
+
+  /* ── Helpers ── */
+  const getUserDetails = (id:string|undefined):User|undefined => {
+    if(!id) return;
+    const cid=id.toString().trim();
+    const ph=cid.replace('+91','').replace(/\s/g,'');
+    return users.find(u=>{
+      const up=u.phoneNumber?.toString().replace(/\s/g,'');
+      return u.id===cid||u.customerId===cid||u.userId===cid||up===ph||
+        (up&&ph.includes(up))||(ph&&up?.includes(ph));
+    });
+  };
+
+  const checkDelayed = (o:Order):boolean => {
+    if(activeTab!=='open') return false;
+    const openStatus=['placed','pending','confirmed','processing','in_progress','out_for_delivery'];
+    if(!openStatus.includes(o.status?.toLowerCase())) return false;
+    const toDate=(d:any):Date|null=>{
+      if(!d) return null;
+      try{if(typeof d==='string') return new Date(d);if(d instanceof Date)return d;if('toDate'in d)return d.toDate();return null;}catch{return null;}
+    };
+    const now=new Date();
+    if(o.sla_deadline){
+      const dl=typeof o.sla_deadline==='object'&&'toDate'in o.sla_deadline?o.sla_deadline.toDate():new Date(o.sla_deadline as string);
+      return now>dl;
+    }
+    const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+    const dd=toDate(o.deliveryDate||o.createdAt);
+    if(!dd) return false;
+    const od=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate());
+    if(od<today) return true;
+    if(od.getTime()===today.getTime()){
+      const t=now.getHours()*60+now.getMinutes();
+      const s=o.deliverySlot?.toLowerCase()||'';
+      if(s.includes('morning')||s.includes('11:00')||s.includes('8:00')) return t>(13*60+30);
+      if(s.includes('afternoon')||s.includes('2:30')||s.includes('1:00')) return t>(16*60+30);
+      if(s.includes('evening')||s.includes('6:00')||s.includes('5:00')) return t>(22*60+30);
+      return t>(22*60);
+    }
+    return false;
+  };
 
   /* URL param: jump to order */
   useEffect(() => {
@@ -661,6 +908,109 @@ export default function OrdersPage() {
     setFilteredOrders(f);
   }, [searchTerm,orders,users,activeTab]);
 
+  /* ── Mobile Priority Sorting Logic ── */
+  const mobileQueue = useMemo(() => {
+    // Only process open orders for the active queue
+    const openStatus = ['placed','pending','confirmed','processing','in_progress','out_for_delivery'];
+    let queueOrders = orders.filter(o => openStatus.includes(o.status?.toLowerCase() || ''));
+
+    // Apply same search filter as desktop for consistency
+    if (searchTerm) {
+      const t = searchTerm.toLowerCase();
+      queueOrders = queueOrders.filter(o => {
+        const u = getUserDetails(o.userId);
+        return o.userName?.toLowerCase().includes(t) || o.userPhone?.includes(searchTerm) ||
+          o.address?.pincode?.includes(searchTerm) || u?.name?.toLowerCase().includes(t) ||
+          o.id.toLowerCase().includes(t);
+      });
+    }
+
+    const slotMatch = (s?: string, kw: string[]) => {
+      const slot = (s || '').toLowerCase();
+      return kw.some(k => slot.includes(k));
+    };
+
+    const getSlotPriority = (s?:string) => {
+      if (slotMatch(s, ['morning','11:00'])) return 1;
+      if (slotMatch(s, ['afternoon','2:30'])) return 2;
+      if (slotMatch(s, ['evening','6:00'])) return 3;
+      return 4;
+    };
+
+    // Partition by slots
+    const rawFast = queueOrders.filter(o => o.isPriority);
+    const othersOpen = queueOrders.filter(o => !o.isPriority);
+
+    const rawMorning = othersOpen.filter(o => getSlotPriority(o.deliverySlot) === 1);
+    const rawAfternoon = othersOpen.filter(o => getSlotPriority(o.deliverySlot) === 2);
+    const rawEvening = othersOpen.filter(o => getSlotPriority(o.deliverySlot) === 3);
+    const rawOthers = othersOpen.filter(o => getSlotPriority(o.deliverySlot) === 4);
+
+    // GREEDY ROUTE OPTIMIZATION (Nearest Neighbor)
+    const optimizeRoute = (orderList: Order[], startPos: {lat: number, lng: number}) => {
+      let currentPos = { ...startPos };
+      const unvisited = [...orderList];
+      const result: Order[] = [];
+
+      while (unvisited.length > 0) {
+        let bestIndex = 0;
+        let minDist = Infinity;
+
+        unvisited.forEach((o, i) => {
+          const lat = o.deliveryAddress?.latitude || o.raw?.latitude || WAREHOUSE.lat;
+          const lng = o.deliveryAddress?.longitude || o.raw?.longitude || WAREHOUSE.lng;
+          const d = dist(currentPos.lat, currentPos.lng, lat, lng);
+          if (d < minDist) {
+            minDist = d;
+            bestIndex = i;
+          }
+        });
+
+        const bestOrder = unvisited.splice(bestIndex, 1)[0];
+        result.push(bestOrder);
+        currentPos = {
+          lat: bestOrder.deliveryAddress?.latitude || bestOrder.raw?.latitude || WAREHOUSE.lat,
+          lng: bestOrder.deliveryAddress?.longitude || bestOrder.raw?.longitude || WAREHOUSE.lng
+        };
+      }
+      return { result, lastPos: currentPos };
+    };
+
+    const fastOpt = optimizeRoute(rawFast, WAREHOUSE);
+    const morningOpt = optimizeRoute(rawMorning, fastOpt.lastPos);
+    const afternoonOpt = optimizeRoute(rawAfternoon, morningOpt.lastPos);
+    const eveningOpt = optimizeRoute(rawEvening, afternoonOpt.lastPos);
+    const othersOpt = optimizeRoute(rawOthers, eveningOpt.lastPos);
+
+    const all = [
+      ...fastOpt.result, 
+      ...morningOpt.result, 
+      ...afternoonOpt.result, 
+      ...eveningOpt.result, 
+      ...othersOpt.result
+    ];
+
+    return {
+      fast: fastOpt.result,
+      morning: morningOpt.result,
+      afternoon: afternoonOpt.result,
+      evening: eveningOpt.result,
+      others: othersOpt.result,
+      all,
+      done: orders.filter(o => ['delivered', 'completed'].includes(o.status?.toLowerCase())),
+      cancelled: orders.filter(o => o.status?.toLowerCase() === 'cancelled')
+    };
+  }, [orders, searchTerm, users]);
+
+  const completedToday = useMemo(() => {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    return orders.filter(o => 
+      ['completed','delivered'].includes(o.status?.toLowerCase()) && 
+      getTs(o.updatedAt || o.createdAt) >= today.getTime()
+    ).sort((a,b) => getTs(b.updatedAt || b.createdAt) - getTs(a.updatedAt || a.createdAt));
+  }, [orders]);
+
   /* Auto-dispatch */
   useEffect(() => {
     if (loading||armyMembers.length===0) return;
@@ -680,55 +1030,28 @@ export default function OrdersPage() {
     return ()=>clearInterval(iv);
   },[orders,armyMembers,loading]);
 
-  /* ── Helpers ── */
-  const getUserDetails = (id:string|undefined):User|undefined => {
-    if(!id) return;
-    const cid=id.toString().trim();
-    const ph=cid.replace('+91','').replace(/\s/g,'');
-    return users.find(u=>{
-      const up=u.phoneNumber?.toString().replace(/\s/g,'');
-      return u.id===cid||u.customerId===cid||u.userId===cid||up===ph||
-        (up&&ph.includes(up))||(ph&&up?.includes(ph));
-    });
-  };
-
-  const checkDelayed = (o:Order):boolean => {
-    if(activeTab!=='open') return false;
-    const open=['placed','pending','confirmed','processing','in_progress','out_for_delivery'];
-    if(!open.includes(o.status?.toLowerCase())) return false;
-    const toDate=(d:any):Date|null=>{
-      if(!d) return null;
-      try{if(typeof d==='string') return new Date(d);if(d instanceof Date)return d;if('toDate'in d)return d.toDate();return null;}catch{return null;}
-    };
-    const now=new Date();
-    if(o.sla_deadline){
-      const dl=typeof o.sla_deadline==='object'&&'toDate'in o.sla_deadline?o.sla_deadline.toDate():new Date(o.sla_deadline as string);
-      return now>dl;
-    }
-    const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
-    const dd=toDate(o.deliveryDate||o.createdAt);
-    if(!dd) return false;
-    const od=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate());
-    if(od<today) return true;
-    if(od.getTime()===today.getTime()){
-      const t=now.getHours()*60+now.getMinutes();
-      const s=o.deliverySlot?.toLowerCase()||'';
-      if(s.includes('morning')||s.includes('11:00')||s.includes('8:00')) return t>(13*60+30);
-      if(s.includes('afternoon')||s.includes('2:30')||s.includes('1:00')) return t>(16*60+30);
-      if(s.includes('evening')||s.includes('6:00')||s.includes('5:00')) return t>(21*60+30);
-      return t>(22*60);
-    }
-    return false;
-  };
-
   /* ── Handlers ── */
   const handleCall=(phone:string)=>{
     if(!phone||phone==='N/A'){alert('Phone not available');return;}
     window.open(`tel:${phone.replace(/\s/g,'')}`, '_self');
   };
   const handleNavigation=(o:Order)=>{
+    const lat = o.deliveryAddress?.latitude || o.raw?.latitude || o.raw?.location?.latitude;
+    const lng = o.deliveryAddress?.longitude || o.raw?.longitude || o.raw?.location?.longitude;
+    const plusCode = o.plusCode || o.raw?.plusCode;
+    
+    if (lat && lng) {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
+      return;
+    }
+    
+    if (plusCode) {
+      window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(plusCode)}`, '_blank');
+      return;
+    }
+
     const dest=o.address.full?.trim()||`${o.address.street}, ${o.address.city} ${o.address.pincode}`;
-    if(!dest){alert('No address');return;}
+    if(!dest){alert('No address info found');return;}
     window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(dest)}`,'_blank');
   };
   const handleDeliveryClick=(o:Order)=>{ setSelectedOrder(o); setShowModal(true); };
@@ -848,11 +1171,16 @@ export default function OrdersPage() {
         try{if(typeof d==='string')return new Date(d);if(d instanceof Date)return d;if('toDate'in d)return d.toDate();return null;}catch{return null;}
       };
       const same=(d1:Date,d2:Date)=>d1.getFullYear()===d2.getFullYear()&&d1.getMonth()===d2.getMonth()&&d1.getDate()===d2.getDate();
-      const todayAll=openOrders.filter(o=>{const d=toD(o.deliveryDate||o.createdAt);return d&&same(d,today);});
+      const todayAll=openOrders.filter(o=>{
+        const d=toD(o.deliveryDate||o.createdAt);
+        if(!d) return false;
+        // Include if delivery is Today OR in the past (Overdue)
+        return same(d,today) || d.getTime() < today.getTime();
+      });
       const slotMatch=(o:Order,kw:string[])=>{ const s=(o.deliverySlot||'').toLowerCase(); return kw.some(k=>s.includes(k)); };
-      const morning=sortOrders(todayAll.filter(o=>slotMatch(o,['morning','11:00','8:00','6:00'])));
-      const afternoon=sortOrders(todayAll.filter(o=>slotMatch(o,['afternoon','2:30','1:00','noon'])));
-      const evening=sortOrders(todayAll.filter(o=>slotMatch(o,['evening','5:00','6:00','7:00','8:00'])));
+      const morning=sortOrders(todayAll.filter(o=>slotMatch(o,['morning','11:00'])));
+      const afternoon=sortOrders(todayAll.filter(o=>slotMatch(o,['afternoon','2:30'])));
+      const evening=sortOrders(todayAll.filter(o=>slotMatch(o,['evening','6:00'])));
       const mIds=new Set([...morning,...afternoon,...evening].map(o=>o.id));
       const others=sortOrders(todayAll.filter(o=>!mIds.has(o.id)));
       const tmr=sortOrders(openOrders.filter(o=>{const d=toD(o.deliveryDate||o.createdAt);return d&&same(d,tomorrow);}));
@@ -1041,13 +1369,18 @@ export default function OrdersPage() {
 
   const renderCard=(order:Order)=>{
     const user=getUserDetails(order.userId);
-    const name=user?.name||order.userName||'Unknown Customer';
-    const phone=user?.phoneNumber||order.userPhone||'N/A';
+    const name=getName(order, user);
+    const phone=user?.phoneNumber||order.userPhone||user?.phone||'N/A';
     const isDelayed=checkDelayed(order);
     const status=order.status?.toLowerCase()||'pending';
     const color=STATUS_COLOR[status]||'#888';
     const progress=STATUS_PROGRESS[status]||0;
-    const addr=order.address.full||`${order.address.street}, ${order.address.pincode}`;
+    
+    // Support both Legacy 'address' and New 'deliveryAddress' structures
+    const addr = order.deliveryAddress?.fullAddress || 
+                 order.deliveryAddress?.address_line || 
+                 order.address?.full || 
+                 (order.address ? `${order.address.street}, ${order.address.pincode}` : 'Address N/A');
 
     return (
       <CardWrap
@@ -1071,6 +1404,9 @@ export default function OrdersPage() {
             <Chip $v="id">#{order.id.slice(-6).toUpperCase()}</Chip>
             <Chip $v="time">
               <FiClock size={10}/> {timeAgo(order.createdAt)}
+            </Chip>
+            <Chip $v="id">
+              <FiCalendar size={10} style={{marginRight:3}}/> {order.deliveryDate ? fmt(order.deliveryDate) : 'ASAP'}
             </Chip>
             {order.quantity>0&&<Chip $v="status">{order.quantity} jar{order.quantity>1?'s':''}</Chip>}
             {order.isPriority&&<Chip $v="priority"><FiZap size={10}/> PRIORITY</Chip>}
@@ -1096,10 +1432,17 @@ export default function OrdersPage() {
           )}
 
           <TagRow>
-            {order.paymentMethod&&<Tag $clr={PM_COLOR[order.paymentMethod]}>{order.paymentMethod}</Tag>}
+            {order.paymentMethod && (
+              <Tag $clr={PM_COLOR[order.paymentMethod]}>
+                {order.paymentMethod}
+                {(order.paymentMethod === 'wallet' || order.paymentMethod === 'upi' || order.paymentMethod === 'razorpay') && (
+                  <span style={{ marginLeft: 6, paddingLeft: 6, borderLeft: '1px solid currentColor', fontWeight: 900 }}>PAID</span>
+                )}
+              </Tag>
+            )}
             {order.deliverySlot&&<Tag $clr="#60A5FA">{order.deliverySlot}</Tag>}
             {order.orderType==='subscription'&&<Tag>SUB</Tag>}
-            <Tag $clr={color}>{STATUS_LABEL[status]||status}</Tag>
+            <LiveStatusBadge orderId={order.id} initialStatus={status} />
           </TagRow>
 
           <PBar><PFill $w={progress} $clr={color}/></PBar>
@@ -1238,6 +1581,10 @@ export default function OrdersPage() {
           <div className="num"><FiBarChart2 size={16}/></div>
           <div className="lbl">Statement</div>
         </StatTab>
+        <StatTab $active={activeTab==='logistics'} $clr="#0F6E56" onClick={()=>setActiveTab('logistics')}>
+          <div className="num"><FiMap size={16}/></div>
+          <div className="lbl">Logistics</div>
+        </StatTab>
       </StatsTabs>
 
       {/* ─ Filter strip (open tab only) ─ */}
@@ -1266,44 +1613,393 @@ export default function OrdersPage() {
         </FilterStrip>
       )}
 
-      {/* ═══════════════════════════════════════════════════════
-          OPEN ORDERS — Mobile Feed + Desktop Kanban
-      ═══════════════════════════════════════════════════════ */}
-      {activeTab==='open'&&(
-        <>
-          {/* Mobile single-column feed */}
-          <MobileFeed>
-            {!hasOpenOrders&&searchTerm===''&&(
-              <EmptySlot style={{padding:'60px 20px'}}>
-                <FiDroplet className="ic" style={{fontSize:40,color:'#1a1a1a'}}/>
-                <div className="t">No open orders right now</div>
-                <div className="s">New orders will appear here automatically</div>
-              </EmptySlot>
-            )}
-            {!hasOpenOrders&&searchTerm!==''&&(
-              <EmptySlot style={{padding:'60px 20px'}}>
-                <FiSearch className="ic" style={{fontSize:36,color:'#1a1a1a'}}/>
-                <div className="t">No results for "{searchTerm}"</div>
-              </EmptySlot>
-            )}
-            {renderSlotSection('Morning','6 AM – 12 PM',<FiSun size={13}/>, '#F59E0B', morning)}
-            {renderSlotSection('Afternoon','12 PM – 5 PM',<FiSun size={13}/>, '#3B82F6', afternoon)}
-            {renderSlotSection('Evening','5 PM – 10 PM',<FiMoon size={13}/>, '#8B5CF6', evening)}
-            {others.length>0?renderSlotSection('Other Slots','Unspecified',<FiClock size={13}/>, '#10B981', others):null}
-            {tmr.length>0?renderSlotSection('Tomorrow','Next day',<FiPackage size={13}/>, '#666', tmr):null}
-            {future.length>0?renderSlotSection('Upcoming','Future',<FiPackage size={13}/>, '#444', future):null}
-          </MobileFeed>
 
-          {/* Desktop Kanban */}
-          <KanbanBoard>
-            {renderLane('Morning','6 AM – 12 PM',<FiSun size={14}/>,'#F59E0B',morning)}
-            {renderLane('Afternoon','12 PM – 5 PM',<FiSun size={14}/>,'#3B82F6',afternoon)}
-            {renderLane('Evening','5 PM – 10 PM',<FiMoon size={14}/>,'#8B5CF6',evening)}
-            {renderLane('Others','Misc Slots',<FiClock size={14}/>,'#10B981',others)}
-            {renderLane('Tomorrow','Next Day',<FiPackage size={14}/>,'#555',tmr)}
-          </KanbanBoard>
-        </>
-      )}
+      {/* ═══════════════════════════════════════════════════════
+          MOBILE DELIVERY PARTNER VIEW ( < 1024px )
+      ═══════════════════════════════════════════════════════ */}
+      <MobileViewContainer>
+        <MobStatusBar>
+          <span>{new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+          <span>Hydrant Admin Pro</span>
+          <span>●●●</span>
+        </MobStatusBar>
+
+        <MobTopBar>
+          <MobTopBarRow>
+            <div>
+              <div style={{fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6}}>
+                <div style={{width: 8, height: 8, borderRadius: '50%', background: '#5DCAA5'}} />
+                Ops Console
+              </div>
+              <div style={{fontSize: 11, color: '#9FE1CB', marginTop: 2}}>Zone: All Active Sectors</div>
+            </div>
+            <div style={{textAlign: 'right'}}>
+              <div style={{fontSize: 10, color: '#9FE1CB', fontWeight: 800, textTransform: 'uppercase'}}>Today's Progress</div>
+              <div style={{fontSize: 14, fontWeight: 800, color: '#fff'}}>{doneCount} / {openCount + doneCount} done</div>
+              <div style={{background: 'rgba(255,255,255,0.15)', borderRadius: 4, height: 4, width: 80, marginTop: 4, overflow: 'hidden', marginLeft: 'auto'}}>
+                <div style={{background: '#5DCAA5', height: '100%', width: `${Math.min(100, (doneCount / (openCount + doneCount || 1)) * 100)}%`}} />
+              </div>
+            </div>
+          </MobTopBarRow>
+
+          {/* Logistics Quick Info */}
+          <div style={{ marginTop: 12, padding: '8px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 12 }}>
+               <div style={{ display: 'flex', flexDirection: 'column' }}>
+                 <span style={{ fontSize: 8, color: '#9FE1CB', fontWeight: 800 }}>EST. DISTANCE</span>
+                 <span style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>{mobileQueue.all.length > 0 ? (mobileQueue.all.length * 1.2).toFixed(1) : 0} KM</span>
+               </div>
+               <div style={{ display: 'flex', flexDirection: 'column' }}>
+                 <span style={{ fontSize: 8, color: '#9FE1CB', fontWeight: 800 }}>FUEL COST</span>
+                 <span style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>₹{mobileQueue.all.length > 0 ? (mobileQueue.all.length * 1.2 * 3.5).toFixed(0) : 0}</span>
+               </div>
+            </div>
+            <div style={{ background: '#5DCAA5', color: '#0F6E56', fontSize: 9, fontWeight: 900, padding: '3px 8px', borderRadius: 6 }}>OPTIMIZED</div>
+          </div>
+          
+          <MobStatsRow>
+            <MobStatPill>
+              <div className="val">{mobileQueue.fast.length}</div>
+              <div className="lbl">Fast Pending</div>
+            </MobStatPill>
+            <MobStatPill>
+              <div className="val">{mobileQueue.morning.length + mobileQueue.afternoon.length + mobileQueue.evening.length}</div>
+              <div className="lbl">Slot Pending</div>
+            </MobStatPill>
+            <MobStatPill>
+              <div className="val">Online</div>
+              <div className="lbl">{armyMembers.filter(m => m.isOnline).length} Partners</div>
+            </MobStatPill>
+          </MobStatsRow>
+        </MobTopBar>
+
+        <MobViewTabs>
+          <MobViewTab $active={mobileTab === 'queue'} onClick={() => setMobileTab('queue')}>Queue</MobViewTab>
+          <MobViewTab $active={mobileTab === 'map'} onClick={() => setMobileTab('map')}>Route</MobViewTab>
+          <MobViewTab $active={mobileTab === 'done'} onClick={() => setMobileTab('done')}>Delivered</MobViewTab>
+        </MobViewTabs>
+
+        <MobContent>
+          {mobileTab === 'queue' && (
+            <>
+              <MobSummaryStrip>
+                <MobSumCard $clr="#993C1D">
+                  <div className="val">{mobileQueue.fast.length}</div>
+                  <div className="lbl">Fast</div>
+                </MobSumCard>
+                <MobSumCard $clr="#854F0B">
+                  <div className="val">{mobileQueue.morning.length}</div>
+                  <div className="lbl">Morning</div>
+                </MobSumCard>
+                <MobSumCard $clr="#185FA5">
+                  <div className="val">{mobileQueue.afternoon.length}</div>
+                  <div className="lbl">Afternoon</div>
+                </MobSumCard>
+              </MobSummaryStrip>
+
+              {/* FAST SECTION */}
+              {mobileQueue.fast.length > 0 && (
+                <>
+                  <div style={{fontSize: 11, fontWeight: 800, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 10}}>⚡ Fast Priority — Deliver ASAP</div>
+                  {mobileQueue.fast.map((o, idx) => (
+                    <MobOrderCard key={o.id} $active={idx === 0}>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
+                        <MobSeqBadge $status={idx === 0 ? 'active' : 'next'}>{idx + 1}</MobSeqBadge>
+                        <div style={{flex: 1}}>
+                          <div style={{fontSize: 15, fontWeight: 800, color: 'var(--foreground)'}}>{getName(o, getUserDetails(o.userId))}</div>
+                          <div style={{fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: 2}}>
+                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
+                          </div>
+                        </div>
+                        <Tag $clr="#EF4444" style={{fontSize: 10}}>FAST</Tag>
+                      </div>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
+                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
+                        <div style={{fontSize: 11, fontWeight: 800, background: 'var(--color-background-tertiary)', padding: '2px 8px', borderRadius: 6}}>
+                          {o.quantity} × 20L
+                        </div>
+                        <ABtn $v="primary" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Done</ABtn>
+                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
+                      </div>
+                    </MobOrderCard>
+                  ))}
+                </>
+              )}
+
+              {/* SLOTS */}
+              {mobileQueue.morning.length > 0 && (
+                <>
+                  <MobDivider><span>Morning · 11:00 AM – 1:30 PM</span></MobDivider>
+                  {mobileQueue.morning.map((o, idx) => (
+                    <MobOrderCard key={o.id}>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
+                        <MobSeqBadge $status="std">{mobileQueue.fast.length + idx + 1}</MobSeqBadge>
+                        <div style={{flex: 1}}>
+                          <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
+                          <div style={{fontSize: 12, color: '#555'}}>
+                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
+                          </div>
+                          {o.paymentMethod && (
+                            <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
+                              <Tag $clr={PM_COLOR[o.paymentMethod]} style={{ fontSize: 9 }}>
+                                {o.paymentMethod}
+                                {(o.paymentMethod === 'wallet' || o.paymentMethod === 'upi' || o.paymentMethod === 'razorpay') && ' · PAID'}
+                              </Tag>
+                              {o.deliveryDate && <Tag style={{ fontSize: 9 }}>{fmt(o.deliveryDate)}</Tag>}
+                            </div>
+                          )}
+                        </div>
+                        <Tag $clr="#F59E0B" style={{fontSize: 10}}>Morning</Tag>
+                      </div>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
+                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
+                        <ABtn $v="default" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Handover</ABtn>
+                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
+                      </div>
+                    </MobOrderCard>
+                  ))}
+                </>
+              )}
+
+              {mobileQueue.afternoon.length > 0 && (
+                <>
+                  <MobDivider><span>Afternoon · 2:30 PM – 4:30 PM</span></MobDivider>
+                  {mobileQueue.afternoon.map((o, idx) => (
+                    <MobOrderCard key={o.id}>
+                       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
+                        <MobSeqBadge $status="std">{mobileQueue.fast.length + mobileQueue.morning.length + idx + 1}</MobSeqBadge>
+                        <div style={{flex: 1}}>
+                          <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
+                          <div style={{fontSize: 12, color: '#555'}}>
+                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
+                          </div>
+                          {o.paymentMethod && (
+                            <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
+                              <Tag $clr={PM_COLOR[o.paymentMethod]} style={{ fontSize: 9 }}>
+                                {o.paymentMethod}
+                                {(o.paymentMethod === 'wallet' || o.paymentMethod === 'upi' || o.paymentMethod === 'razorpay') && ' · PAID'}
+                              </Tag>
+                              {o.deliveryDate && <Tag style={{ fontSize: 9 }}>{fmt(o.deliveryDate)}</Tag>}
+                            </div>
+                          )}
+                        </div>
+                        <Tag $clr="#3B82F6" style={{fontSize: 10}}>Afternoon</Tag>
+                      </div>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
+                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
+                        <ABtn $v="default" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Handover</ABtn>
+                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
+                      </div>
+                    </MobOrderCard>
+                  ))}
+                </>
+              )}
+
+              {mobileQueue.evening.length > 0 && (
+                <>
+                  <MobDivider><span>Evening · 6:00 PM – 10:30 PM</span></MobDivider>
+                  {mobileQueue.evening.map((o, idx) => (
+                    <MobOrderCard key={o.id}>
+                       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
+                        <MobSeqBadge $status="std">{mobileQueue.fast.length + mobileQueue.morning.length + mobileQueue.afternoon.length + idx + 1}</MobSeqBadge>
+                        <div style={{flex: 1}}>
+                          <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
+                          <div style={{fontSize: 12, color: '#555'}}>
+                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
+                          </div>
+                          {o.paymentMethod && (
+                            <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
+                              <Tag $clr={PM_COLOR[o.paymentMethod]} style={{ fontSize: 9 }}>
+                                {o.paymentMethod}
+                                {(o.paymentMethod === 'wallet' || o.paymentMethod === 'upi' || o.paymentMethod === 'razorpay') && ' · PAID'}
+                              </Tag>
+                              {o.deliveryDate && <Tag style={{ fontSize: 9 }}>{fmt(o.deliveryDate)}</Tag>}
+                            </div>
+                          )}
+                        </div>
+                        <Tag $clr="#8B5CF6" style={{fontSize: 10}}>Evening</Tag>
+                      </div>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
+                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
+                        <ABtn $v="default" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Handover</ABtn>
+                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
+                      </div>
+                    </MobOrderCard>
+                  ))}
+                </>
+              )}
+
+              {mobileQueue.others.length > 0 && (
+                <>
+                  <MobDivider><span>Other Slots</span></MobDivider>
+                  {mobileQueue.others.map((o, idx) => (
+                    <MobOrderCard key={o.id}>
+                       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
+                        <MobSeqBadge $status="std">{mobileQueue.all.length - mobileQueue.others.length + idx + 1}</MobSeqBadge>
+                        <div style={{flex: 1}}>
+                          <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
+                          <div style={{fontSize: 12, color: '#555'}}>
+                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
+                          </div>
+                        </div>
+                        <Tag $clr="var(--color-text-tertiary)" style={{fontSize: 10}}>{o.deliverySlot || 'Standard'}</Tag>
+                      </div>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
+                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
+                        <ABtn $v="default" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Handover</ABtn>
+                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
+                      </div>
+                    </MobOrderCard>
+                  ))}
+                </>
+              )}
+
+              {mobileQueue.all.length === 0 && (
+                <EmptySlot style={{padding: '60px 20px'}}>
+                  <FiCheckCircle size={48} color="#0F6E56" style={{opacity: 0.3}} />
+                  <div style={{fontSize: 16, fontWeight: 800, marginTop: 16}}>All Clear!</div>
+                  <div style={{fontSize: 13, color: '#555'}}>No pending deliveries in the queue.</div>
+                </EmptySlot>
+              )}
+            </>
+          )}
+
+          {mobileTab === 'map' && (
+            <div style={{padding: '0 0 40px'}}>
+              <div style={{padding: 16, background: 'rgba(15,110,86,0.05)', borderBottom: '1px solid rgba(15,110,86,0.1)', marginBottom: 12}}>
+                 <div style={{fontSize: 10, fontWeight: 800, color: '#0F6E56', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Optimized Sequence</div>
+                 <div style={{fontSize: 16, fontWeight: 800, marginTop: 4}}>{mobileQueue.all.length} Waypoints Active</div>
+                 <div style={{fontSize: 12, color: '#555', marginTop: 4}}>Stops are ordered by Priority (Fast Delivery → Morning → Afternoon → Evening)</div>
+                 
+                 <DeliveryMap orders={orders} warehouse={WAREHOUSE} />
+              </div>
+
+              {mobileQueue.all.length === 0 ? (
+                <div style={{padding: 40, textAlign: 'center'}}>
+                  <FiCheckCircle size={48} color="#0F6E56" style={{opacity: 0.2}} />
+                  <div style={{fontSize: 14, fontWeight: 700, marginTop: 16}}>No routes to plan today.</div>
+                </div>
+              ) : (
+                <div style={{padding: '0 16px'}}>
+                  {mobileQueue.all.map((o, idx) => {
+                    const isFast = mobileQueue.fast.some(f => f.id === o.id);
+                    return (
+                      <div key={o.id} style={{display: 'flex', gap: 12, marginBottom: 16, position: 'relative'}}>
+                        {idx !== mobileQueue.all.length - 1 && (
+                          <div style={{position: 'absolute', left: 15, top: 30, bottom: -16, width: 2, background: 'rgba(15,110,86,0.1)', borderStyle: 'dashed'}} />
+                        )}
+                        <div style={{
+                          width: 32, height: 32, borderRadius: '50%', background: isFast ? '#EF4444' : '#0F6E56', 
+                          color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                          fontSize: 12, fontWeight: 800, flexShrink: 0, zIndex: 1
+                        }}>
+                          {idx + 1}
+                        </div>
+                        <div style={{flex: 1, background: '#fff', border: '1px solid var(--color-border-primary)', borderRadius: 12, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                          <div>
+                            <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
+                            <div style={{display: 'flex', alignItems: 'center', gap: 4, marginTop: 4}}>
+                              <FiMapPin size={10} color={o.plusCode ? '#0F6E56' : '#999'} />
+                              <div style={{fontSize: 10, color: o.plusCode ? '#0F6E56' : '#999', fontFamily: 'Fira Code', fontWeight: 600}}>
+                                {o.plusCode || 'NO PLUS CODE'}
+                              </div>
+                            </div>
+                          </div>
+                          <ABtn $v="info" style={{minHeight: 32, width: 32, padding: 0, borderRadius: 8}} onClick={() => handleNavigation(o)}>
+                            <FiNavigation size={14}/>
+                          </ABtn>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  
+                  <ABtn $v="primary" style={{marginTop: 10, width: '100%', minHeight: 48}} onClick={() => {
+                    if (mobileQueue.all[0]) handleNavigation(mobileQueue.all[0]);
+                  }}>Start Optimized Navigation</ABtn>
+                </div>
+              )}
+
+              {/* Floating Next Customer Card */}
+              {mobileQueue.all.length > 0 && (
+                <div style={{ position: 'fixed', bottom: 20, left: 16, right: 16, background: '#fff', borderRadius: 20, padding: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.2)', border: '1px solid #0F6E5630', zIndex: 1000 }}>
+                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <div style={{ background: '#0F6E5615', color: '#0F6E56', fontSize: 9, fontWeight: 900, padding: '4px 10px', borderRadius: 8 }}>NEXT CUSTOMER</div>
+                      <div style={{ fontSize: 11, color: '#666', fontWeight: 600 }}>{mobileQueue.all.length} stops left</div>
+                   </div>
+                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <div style={{ width: 44, height: 44, borderRadius: 14, background: '#0F6E56', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800 }}>
+                        {mobileQueue.all[0].quantity}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: '#1a1a1a' }}>{getName(mobileQueue.all[0], getUserDetails(mobileQueue.all[0].userId))}</div>
+                        <div style={{ fontSize: 12, color: '#666', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <FiMapPin size={10} color="#0F6E56" /> {mobileQueue.all[0].plusCode || 'Tap to locate'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                         <button onClick={() => handleCall(mobileQueue.all[0].userPhone || mobileQueue.all[0].phone)} style={{ width: 40, height: 40, borderRadius: 12, border: '1px solid #E2E8F0', background: '#fff', color: '#0F6E56', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <FiPhone size={18} />
+                         </button>
+                         <button onClick={() => handleNavigation(mobileQueue.all[0])} style={{ width: 40, height: 40, borderRadius: 12, border: 'none', background: '#0F6E56', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <FiNavigation size={18} />
+                         </button>
+                      </div>
+                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {mobileTab === 'done' && (
+            <>
+              <MobSummaryStrip>
+                <MobSumCard $clr="#10B981">
+                  <div className="val">{completedToday.length}</div>
+                  <div className="lbl">Delivered</div>
+                </MobSumCard>
+                <MobSumCard $clr="#8B5CF6">
+                  <div className="val">₹{completedToday.reduce((s,o) => s + (o.handover?.amountPaid || (o.quantity * 37)), 0)}</div>
+                  <div className="lbl">Revenue</div>
+                </MobSumCard>
+              </MobSummaryStrip>
+
+              <div style={{fontSize: 11, fontWeight: 800, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 12}}>Delivered Today</div>
+              {completedToday.map(o => (
+                <MobOrderCard key={o.id} style={{opacity: 0.8}}>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                     <div style={{flex: 1}}>
+                        <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
+                        <div style={{fontSize: 11, color: '#555'}}>{timeAgo(o.updatedAt || o.createdAt)} · {o.quantity} jars</div>
+                      </div>
+                      <Tag $clr="#10B981">Done</Tag>
+                  </div>
+                </MobOrderCard>
+              ))}
+              {completedToday.length === 0 && (
+                 <div style={{padding: '40px 20px', textAlign: 'center', color: '#555', fontSize: 13}}>No orders completed yet today.</div>
+              )}
+            </>
+          )}
+        </MobContent>
+      </MobileViewContainer>
+
+      {/* ═══════════════════════════════════════════════════════
+          DESKTOP VIEW ( >= 1024px )
+      ═══════════════════════════════════════════════════════ */}
+      <div style={{ display: 'contents' }}>
+        {activeTab === 'open' && (
+          <>
+            {/* Desktop Kanban */}
+            <KanbanBoard>
+              {renderLane('Morning', '11 AM – 1:30 PM', <FiSun size={14} />, '#F59E0B', morning)}
+              {renderLane('Afternoon', '2:30 PM – 4:30 PM', <FiSun size={14} />, '#3B82F6', afternoon)}
+              {renderLane('Evening', '6 PM – 10:30 PM', <FiMoon size={14} />, '#8B5CF6', evening)}
+              {renderLane('Others', 'Misc Slots', <FiClock size={14} />, '#10B981', others)}
+              {renderLane('Tomorrow', 'Next Day', <FiPackage size={14} />, '#555', tmr)}
+            </KanbanBoard>
+          </>
+        )}
+      </div>
 
       {/* ═══════════════════════════════════════════════════════
           COMPLETED / CANCELLED — responsive grid
@@ -1585,6 +2281,50 @@ export default function OrdersPage() {
         );
       })()}
 
+      {activeTab==='logistics' && (
+        <div style={{ padding: '0 20px 40px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20, marginTop: 20 }}>
+            <div>
+              <DeliveryMap orders={orders} warehouse={WAREHOUSE} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ background: '#111', border: '1px solid #1a1a1a', borderRadius: 20, padding: 20 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#0F6E56', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Delivery Intelligence</div>
+                <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4, color: '#fff' }}>Route Analytics</div>
+                
+                <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1a1a1a', paddingBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: '#666' }}>Today's Success</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#10B981' }}>{Math.round((doneCount / (openCount + doneCount || 1)) * 100)}%</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1a1a1a', paddingBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: '#666' }}>Avg. Time/Stop</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>8.5 mins</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1a1a1a', paddingBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: '#666' }}>Fuel Saved (Est)</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#5DCAA5' }}>12%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(15,110,86,0.05)', border: '1px solid rgba(15,110,86,0.1)', borderRadius: 20, padding: 20 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#0F6E56', textTransform: 'uppercase' }}>Cluster Density</div>
+                <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                   {['Kankinara', 'Naihati', 'Barrackpore'].map(z => (
+                     <div key={z} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#0F6E56' }} />
+                        <span style={{ fontSize: 12, color: '#333', flex: 1 }}>{z}</span>
+                        <span style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>{Math.floor(Math.random() * 20) + 5} Orders</span>
+                     </div>
+                   ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══════════════════════════════════════════════════════
           MODALS
       ═══════════════════════════════════════════════════════ */}
@@ -1592,6 +2332,7 @@ export default function OrdersPage() {
         {showModal&&selectedOrder&&(
           <DeliveryHandoverModal
             order={selectedOrder}
+            user={getUserDetails(selectedOrder.userId)}
             walletBalance={getUserDetails(selectedOrder.userId)?.wallet_balance ?? 0}
             onClose={()=>setShowModal(false)}
             onComplete={handleMarkDelivered}

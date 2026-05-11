@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "hydrant-water-delivery"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

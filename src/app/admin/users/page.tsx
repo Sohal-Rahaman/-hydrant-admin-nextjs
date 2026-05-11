@@ -65,6 +65,10 @@ interface User {
   lastOrderDate?: { toDate(): Date } | Date | string;
   createdAt?: { toDate(): Date } | Date | string;
   role?: string; isActive?: boolean; status?: string;
+  customer_status?: 'VISITOR' | 'FREE_CUSTOMER' | 'DEPOSIT_CUSTOMER' | 'PRO_CUSTOMER';
+  free_onboard?: boolean;
+  subscription_active?: boolean;
+  total_orders?: number;
   addresses?: Address[]; orders?: Order[];
 }
 
@@ -93,6 +97,16 @@ const statusBadge = (s: string) =>
 const payBadge = (p?: string) =>
   p === 'wallet' || p === 'Wallet' ? 'b-wallet' :
   p === 'cash' || p === 'Cash' ? 'b-cash' : 'b-upi';
+
+const customerStatusBadge = (s?: string) => {
+  switch (s) {
+    case 'PRO_CUSTOMER': return { cls: 'b-delivered', label: 'PRO', color: '#EAB308', bg: 'rgba(234, 179, 8, 0.1)' };
+    case 'DEPOSIT_CUSTOMER': return { cls: 'b-transit', label: 'DEPOSIT', color: 'var(--color-accent-cyan)', bg: 'rgba(0, 229, 255, 0.1)' };
+    case 'FREE_CUSTOMER': return { cls: 'b-delivered', label: 'LEGACY', color: 'var(--color-accent-green)', bg: 'rgba(163, 230, 53, 0.1)' };
+    case 'VISITOR': return { cls: 'b-pending', label: 'VISITOR', color: 'var(--color-text-tertiary)', bg: 'rgba(255, 255, 255, 0.05)' };
+    default: return { cls: 'b-pending', label: 'USER', color: 'var(--color-text-tertiary)', bg: 'rgba(255, 255, 255, 0.05)' };
+  }
+};
 
 // ─── Styled Components ────────────────────────────────────
 const Wrap = styled.div`
@@ -481,6 +495,13 @@ export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const typeFilter = searchParams.get('type');
+  const statusFilter = searchParams.get('status');
+  const navFilter = searchParams.get('filter');
+  const customerIdParam = searchParams.get('customerId');
+
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<User | null>(null);
   const [tab, setTab] = useState<TabId>('overview');
@@ -527,6 +548,26 @@ export default function UsersPage() {
   const [isAddrModalOpen, setIsAddrModalOpen] = useState(false);
   const [addrForm, setAddrForm] = useState<Partial<Address>>({});
 
+  const handleStatusOverride = async (uid: string, newStatus: User['customer_status']) => {
+    if (!newStatus) return;
+    const confirmed = confirm(`EXECUTIVE OVERRIDE: Change customer status to ${newStatus}? This will be logged.`);
+    if (!confirmed) return;
+    
+    setSaving(true);
+    try {
+      await updateDocument('users', uid, { 
+        customer_status: newStatus,
+        updatedAt: serverTimestamp() 
+      });
+      
+      showToast(`Status updated to ${newStatus}`);
+    } catch (err) {
+      showToast('Status update failed');
+      console.error(err);
+    }
+    setSaving(false);
+  };
+
   const updateUserField = async (userId: string, field: string, value: any) => {
     try {
       await updateDocument('users', userId, { [field]: value });
@@ -551,9 +592,6 @@ export default function UsersPage() {
     setTimeout(() => setToastShow(false), 2600);
   }, []);
 
-  const searchParams = useSearchParams();
-  const customerIdParam = searchParams.get('customerId');
-  const router = useRouter();
 
   // Handle deep linking from Orders page or Fleet link
   useEffect(() => {
@@ -666,31 +704,42 @@ export default function UsersPage() {
 
       if (!matchesSearch) return false;
 
-      // Inactive filter logic
-      if (inactiveFilter !== 'all') {
+      // Type / Status / Nav Filter Logic
+      if (statusFilter && u.customer_status !== statusFilter) return false;
+      
+      if (navFilter === 'never_ordered' && (u.total_orders || 0) > 0) return false;
+      if (navFilter === 'never_ordered' && (u.total_orders === undefined)) {
+        // Fallback check if total_orders isn't synced
         const uOrds = orders.filter(o => o.userId === u.id);
-        if (uOrds.length === 0) return true; // Never ordered = inactive
+        if (uOrds.length > 0) return false;
+      }
 
-        const lastO = uOrds.sort((a,b) => {
-          const getTs = (o: any) => {
-            const t = o.createdAt;
-            if (!t) return 0;
-            if (typeof t.toMillis === 'function') return t.toMillis();
-            return new Date(t).getTime();
-          };
-          return getTs(b) - getTs(a);
-        })[0];
+      if (navFilter === 'inactive') {
+        const uOrds = orders.filter(o => o.userId === u.id);
+        if (uOrds.length > 0) {
+          const lastO = uOrds.sort((a,b) => {
+            const getTs = (o: any) => {
+              const t = o.createdAt;
+              if (!t) return 0;
+              if (typeof t.toMillis === 'function') return t.toMillis();
+              return new Date(t).getTime();
+            };
+            return getTs(b) - getTs(a);
+          })[0];
+          const lastTs = lastO.createdAt ? (typeof (lastO.createdAt as any).toMillis === 'function' ? (lastO.createdAt as any).toMillis() : new Date(lastO.createdAt as any).getTime()) : 0;
+          const diffDays = (Date.now() - lastTs) / (1000 * 60 * 60 * 24);
+          if (diffDays < 30) return false; // Not inactive if ordered in last 30 days
+        }
+      }
 
-        const lastTs = lastO.createdAt ? (typeof (lastO.createdAt as any).toMillis === 'function' ? (lastO.createdAt as any).toMillis() : new Date(lastO.createdAt as any).getTime()) : 0;
-        const diffMs = Date.now() - lastTs;
-        const diffDays = diffMs / (1000 * 60 * 60 * 24);
-
-        if (inactiveFilter === '10d') return diffDays >= 10;
-        if (inactiveFilter === '1mo') return diffDays >= 30;
-        if (inactiveFilter === '5mo') return diffDays >= 150;
+      if (navFilter === 'all_customers') {
+        const s = u.customer_status || 'VISITOR';
+        if (s === 'VISITOR') return false; // Exclude non-converted visitors
       }
 
       return true;
+
+      // Inactive filter logic (Legacy dropdown)
     })
     .sort((a, b) => {
       // Specific sort: if inactivity filter is on, sort by inactivity duration (Low to High)
@@ -1888,7 +1937,23 @@ export default function UsersPage() {
                 <UserRow key={u.id} $active={selected?.id === u.id} onClick={() => setSelected(u)}>
                   <Avatar $bg={p.bg} $tc={p.tc}>{initials(name)}</Avatar>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <UName $active={selected?.id === u.id}>{name}</UName>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <UName $active={selected?.id === u.id}>{name}</UName>
+                      {u.customer_status && (
+                        <div style={{ 
+                          fontSize: '7px', 
+                          fontWeight: 900, 
+                          padding: '1px 4px', 
+                          borderRadius: '4px',
+                          background: customerStatusBadge(u.customer_status).bg,
+                          color: customerStatusBadge(u.customer_status).color,
+                          border: `1px solid ${customerStatusBadge(u.customer_status).color}22`,
+                          textTransform: 'uppercase'
+                        }}>
+                          {customerStatusBadge(u.customer_status).label}
+                        </div>
+                      )}
+                    </div>
                     <UID>{u.customerId || u.id}</UID>
                   </div>
                   <button
@@ -1930,9 +1995,38 @@ export default function UsersPage() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <Badge $variant={statusVariant(selected.status || selected.isActive)}>
-                    {selected.status || (selected.isActive ? 'Active' : 'Inactive')}
-                  </Badge>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Badge $variant={statusVariant(selected.status || selected.isActive)}>
+                      {selected.status || (selected.isActive ? 'Active' : 'Inactive')}
+                    </Badge>
+                    
+                    {/* EXECUTIVE STATUS OVERRIDE */}
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <select 
+                        value={selected.customer_status || 'VISITOR'}
+                        onChange={(e) => handleStatusOverride(selected.id, e.target.value as any)}
+                        style={{
+                          background: customerStatusBadge(selected.customer_status).bg,
+                          color: customerStatusBadge(selected.customer_status).color,
+                          border: `1px solid ${customerStatusBadge(selected.customer_status).color}44`,
+                          borderRadius: '6px',
+                          padding: '4px 24px 4px 10px',
+                          fontSize: '10px',
+                          fontWeight: 800,
+                          appearance: 'none',
+                          cursor: 'pointer',
+                          outline: 'none',
+                          textTransform: 'uppercase'
+                        }}
+                      >
+                        <option value="VISITOR">Visitor</option>
+                        <option value="FREE_CUSTOMER">Legacy (Free)</option>
+                        <option value="DEPOSIT_CUSTOMER">Deposit Paid</option>
+                        <option value="PRO_CUSTOMER">PRO Subscriber</option>
+                      </select>
+                      <FiChevronDown size={10} style={{ position: 'absolute', right: 8, color: customerStatusBadge(selected.customer_status).color, pointerEvents: 'none' }} />
+                    </div>
+                  </div>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <BtnXS $variant="info" as="a" href={`tel:${selected?.phoneNumber || selected?.phone}`} style={{ textDecoration: 'none', width: '32px', padding: 0, justifyContent: 'center' }} title="Call Customer">
                       <FiPhoneCall size={14} />

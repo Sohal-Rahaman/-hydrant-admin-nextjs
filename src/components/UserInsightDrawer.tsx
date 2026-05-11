@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiX, FiPhone, FiMessageCircle, FiMail, FiBox, FiDollarSign, FiClock, FiUser, FiActivity, FiEdit3, FiSave, FiAlertCircle, FiCheck } from 'react-icons/fi';
-import { updateDocument, Jar, subscribeToCollection } from '@/lib/firebase';
+import { FiX, FiPhone, FiMessageCircle, FiMail, FiBox, FiDollarSign, FiClock, FiUser, FiActivity, FiEdit3, FiSave, FiAlertCircle, FiCheck, FiPlus, FiLogOut } from 'react-icons/fi';
+import { updateDocument, Jar, subscribeToCollection, assignJarToCustomer, returnJar, normalizeUser, syncUserAuthDetails } from '@/lib/firebase';
 import { where } from 'firebase/firestore';
 import { logActivity } from '@/lib/activityLogger';
+import { useAuth } from '@/context/AuthContext';
 
 interface UserInsightDrawerProps {
   isOpen: boolean;
@@ -29,15 +30,26 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
   const [isEditing, setIsEditing] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [jarsOccupied, setJarsOccupied] = useState<number>(0);
+  const [altPhone, setAltPhone] = useState<string>('');
+  const [dob, setDob] = useState<string>('');
+  const [gender, setGender] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle'|'success'|'error'>('idle');
 
   const [heldJars, setHeldJars] = useState<Jar[]>([]);
+  const [isAssigningJar, setIsAssigningJar] = useState(false);
+  const [newJarId, setNewJarId] = useState('');
+  const [isProcessingJar, setIsProcessingJar] = useState(false);
+
+  const { currentUser } = useAuth();
 
   useEffect(() => {
     if (user) {
-      setWalletBalance(user.wallet_balance ?? 0);
+      setWalletBalance(user.wallet_balance ?? user.walletBalance ?? 0);
       setJarsOccupied(user.jars_occupied ?? user.jarHold ?? 0);
+      setAltPhone(user.alt_phone || user.altPhone || '');
+      setDob(user.dob || user.dateOfBirth || '');
+      setGender(user.gender || '');
       setIsEditing(false);
       setSaveStatus('idle');
       
@@ -53,9 +65,25 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
 
   if (!user) return null;
 
-  const name = user.full_name || user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'UNKNOWN_ENTITY';
-  const phone = user.phone || user.phoneNumber || 'NO_PHONE';
+  const normalized = normalizeUser(user) as any;
+  const name = normalized.displayName;
+  const phone = normalized.displayPhone;
   const waPhone = phone.replace(/[^\d]/g, '').startsWith('91') ? phone.replace(/[^\d]/g, '') : '91' + phone.replace(/[^\d]/g, '');
+
+  const handleSyncAuth = async () => {
+    setIsSaving(true);
+    setSaveStatus('idle');
+    try {
+      await syncUserAuthDetails({ userId: user.id });
+      setSaveStatus('success');
+      // Profile synced from Auth
+    } catch (error) {
+      console.error('Sync failed:', error);
+      setSaveStatus('error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleUpdate = async () => {
     setIsSaving(true);
@@ -63,7 +91,11 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
     try {
       await updateDocument('users', user.id, {
         wallet_balance: Number(walletBalance),
-        jars_occupied: Number(jarsOccupied)
+        jars_occupied: Number(jarsOccupied),
+        alt_phone: altPhone,
+        dob: dob,
+        gender: gender,
+        updatedAt: new Date()
       });
       
       await logActivity({
@@ -71,7 +103,7 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
         actor: 'ADMIN',
         actorName: 'Admin',
         actorId: 'admin_panel',
-        details: `Manual adjustment for ${name} (ID: ${user.id}). Wallet: ${walletBalance}, Jars: ${jarsOccupied}`,
+        details: `Manual adjustment for ${name} (ID: ${user.id}). Wallet: ${walletBalance}, Jars: ${jarsOccupied}, Alt: ${altPhone}, DOB: ${dob}, Gen: ${gender}`,
         targetId: user.id
       });
 
@@ -83,6 +115,58 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
       setSaveStatus('error');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleReturnJar = async (jarId: string) => {
+    if (!confirm(`Return jar ${jarId} to warehouse?`)) return;
+    setIsProcessingJar(true);
+    try {
+      const staffId = currentUser?.uid || 'admin_panel';
+      await returnJar(jarId, staffId, user.customerId || user.id);
+      
+      await logActivity({
+        action: 'JAR_MANUAL_RETURN',
+        actor: 'ADMIN',
+        actorName: 'Admin',
+        actorId: staffId,
+        details: `Manually returned jar ${jarId} from user ${name}`,
+        targetId: user.id
+      });
+    } catch (error: any) {
+      alert(`Error: ${error.message || 'Failed to return jar'}`);
+    } finally {
+      setIsProcessingJar(false);
+    }
+  };
+
+  const handleAssignJar = async () => {
+    if (!newJarId.trim()) return;
+    let finalId = newJarId.trim().toUpperCase();
+    if (/^\d+$/.test(finalId)) finalId = `HYD-JAR-${finalId.padStart(4, '0')}`;
+    else if (!finalId.startsWith('HYD-JAR-')) finalId = `HYD-JAR-${finalId}`;
+
+    setIsProcessingJar(true);
+    try {
+      const staffId = currentUser?.uid || 'admin_panel';
+      const ident = user.customerId || user.id;
+      await assignJarToCustomer(finalId, ident, staffId);
+      
+      await logActivity({
+        action: 'JAR_MANUAL_ASSIGN',
+        actor: 'ADMIN',
+        actorName: 'Admin',
+        actorId: staffId,
+        details: `Manually assigned jar ${finalId} to user ${name}`,
+        targetId: user.id
+      });
+      
+      setNewJarId('');
+      setIsAssigningJar(false);
+    } catch (error: any) {
+      alert(`Error: ${error.message || 'Failed to assign jar'}`);
+    } finally {
+      setIsProcessingJar(false);
     }
   };
 
@@ -109,6 +193,15 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
               <div>
                 <h2 className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.3em]">Tactical Entity Insight</h2>
                 <div className="text-[10px] text-zinc-600 font-mono mt-1 uppercase">ID_STRING: {user.customerId || user.id}</div>
+                {name === 'Unknown Customer' && (
+                  <button 
+                    onClick={handleSyncAuth}
+                    disabled={isSaving}
+                    className="mt-2 flex items-center gap-2 text-[9px] text-amber-500 hover:text-amber-400 font-black uppercase tracking-widest border border-amber-500/30 px-2 py-1 rounded bg-amber-500/5"
+                  >
+                    <FiActivity size={10} /> Sync Identity from Auth
+                  </button>
+                )}
               </div>
               <button 
                 onClick={onClose} 
@@ -252,9 +345,37 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
                 </div>
                 
                 <div className="space-y-4">
-                  {[
+                   {[
                     { label: 'Network Alias', value: user.email || 'GHOST_USER', icon: <FiMail /> },
-                    { label: 'Origin Date', value: formatDateSafe(user.createdAt), icon: <FiUser /> },
+                    { label: 'Alt. Phone', value: isEditing ? (
+                      <input 
+                        value={altPhone} 
+                        onChange={e => setAltPhone(e.target.value)}
+                        className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-[11px] text-cyan-400 w-32"
+                        placeholder="Secondary Phone"
+                      />
+                    ) : (altPhone || 'NONE'), icon: <FiPhone /> },
+                    { label: 'Date of Birth', value: isEditing ? (
+                      <input 
+                        value={dob} 
+                        onChange={e => setDob(e.target.value)}
+                        className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-[11px] text-cyan-400 w-32"
+                        placeholder="e.g. 15 Jan 1990"
+                      />
+                    ) : (dob || 'NONE'), icon: <FiClock /> },
+                    { label: 'Gender', value: isEditing ? (
+                      <select 
+                        value={gender} 
+                        onChange={e => setGender(e.target.value)}
+                        className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-[11px] text-cyan-400 w-32"
+                      >
+                        <option value="">Select</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Trans">Trans</option>
+                      </select>
+                    ) : (gender || 'NONE'), icon: <FiUser /> },
+                    { label: 'Origin Date', value: formatDateSafe(user.createdAt), icon: <FiActivity /> },
                     { label: 'Last Signal', value: formatDateSafe(user.lastOrderDate), icon: <FiClock /> }
                   ].map((row, idx) => (
                     <div key={idx} className="flex items-center justify-between group p-3 bg-zinc-950/50 rounded border border-transparent hover:border-zinc-900 transition-all">
@@ -262,7 +383,9 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
                         <div className="text-zinc-700 group-hover:text-cyan-400 transition-colors">{row.icon}</div>
                         <div className="text-[9px] text-zinc-600 font-black uppercase tracking-widest font-mono">{row.label}</div>
                       </div>
-                      <div className="text-[11px] font-mono text-zinc-400 group-hover:text-white transition-colors">{row.value}</div>
+                      <div className="text-[11px] font-mono text-zinc-400 group-hover:text-white transition-colors">
+                        {typeof row.value === 'string' || !row.value ? row.value : row.value}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -276,28 +399,128 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
                   </div>
                   
                   {heldJars.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-3">
-                      {heldJars.map(jar => {
-                        const lastScan = jar.lastScanAt?.toDate ? jar.lastScanAt.toDate() : new Date(jar.lastScanAt);
-                        const days = Math.floor((new Date().getTime() - lastScan.getTime()) / (1000 * 3600 * 24));
-                        return (
-                          <div key={jar.id} className="bg-zinc-950 p-4 rounded border border-zinc-800 flex flex-col justify-between hover:border-cyan-400/50 transition-colors group relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-8 h-8 bg-cyan-400/5 rounded-bl-full"></div>
-                            <div className="text-white font-mono text-[11px] font-bold z-10 relative">{jar.id}</div>
-                            <div className="flex justify-between items-end mt-4 z-10 relative">
-                               <div className="text-[9px] text-zinc-500 uppercase font-black tracking-widest bg-black px-1.5 py-0.5 rounded-sm border border-zinc-900">{days} Days</div>
-                               <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-[0_0_8px_rgba(34,211,238,0.5)] group-hover:animate-ping"></div>
-                            </div>
+                  <div className="flex flex-col gap-2">
+                    {heldJars.map(jar => {
+                      const lastScan = jar.lastScanAt?.toDate ? jar.lastScanAt.toDate() : new Date(jar.lastScanAt);
+                      const days = Math.floor((Date.now() - lastScan.getTime()) / (1000 * 3600 * 24));
+                      const isOverdue = days >= 4;
+                      const isCritical = days >= 7;
+                      const waPhone = phone !== 'NO_PHONE'
+                        ? phone.replace(/\D/g, '').replace(/^(?!91)/, '91')
+                        : '';
+
+                      return (
+                        <div
+                          key={jar.id}
+                          className="bg-zinc-950 rounded border flex flex-col gap-3 p-3 transition-colors"
+                          style={{
+                            borderColor: isCritical ? 'rgba(239,68,68,0.5)' : isOverdue ? 'rgba(251,146,60,0.5)' : 'rgb(39,39,42)',
+                            background: isCritical ? 'rgba(239,68,68,0.05)' : isOverdue ? 'rgba(251,146,60,0.05)' : undefined,
+                          }}
+                        >
+                          {/* Top row */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-white font-mono text-[12px] font-bold">{jar.id}</span>
+                            <span
+                              className="text-[11px] font-bold px-2 py-0.5 rounded-full border"
+                              style={{
+                                background: isCritical ? 'rgba(239,68,68,0.15)' : isOverdue ? 'rgba(251,146,60,0.15)' : 'rgba(16,185,129,0.1)',
+                                color: isCritical ? '#f87171' : isOverdue ? '#fb923c' : '#34d399',
+                                borderColor: isCritical ? 'rgba(239,68,68,0.3)' : isOverdue ? 'rgba(251,146,60,0.3)' : 'rgba(16,185,129,0.2)',
+                              }}
+                            >
+                              {isCritical ? '🔴' : isOverdue ? '🟡' : '🟢'} {days} days
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
+
+                          {/* Overdue action row */}
+                          {isOverdue && (
+                            <div className="flex gap-2 mt-1">
+                              <a
+                                href={`tel:${phone}`}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded text-[11px] font-bold text-white no-underline"
+                                style={{ background: '#10b981' }}
+                              >
+                                📞 Call
+                              </a>
+                              {waPhone && (
+                                <a
+                                  href={`https://wa.me/${waPhone}?text=Hi, please return your water jar ${jar.id} — it has been held for ${days} days. Thank you!`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="flex items-center gap-1 px-3 py-1.5 rounded text-[11px] font-bold text-white no-underline"
+                                  style={{ background: '#25d366' }}
+                                >
+                                  WhatsApp
+                                </a>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Overdue warning text */}
+                          {isCritical && (
+                            <div className="text-[10px] font-bold text-red-400 uppercase tracking-wide">
+                              ⚠️ 7+ days — Urgent: Request jar return immediately
+                            </div>
+                          )}
+
+                          {/* Quick Return Action */}
+                          <button
+                            disabled={isProcessingJar}
+                            onClick={() => handleReturnJar(jar.id)}
+                            className="mt-1 flex items-center justify-center gap-2 py-2 bg-zinc-900 border border-zinc-900 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-red-400 hover:border-red-400/30 transition-all rounded"
+                          >
+                            <FiLogOut size={12} /> Return to Warehouse
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                   ) : (
                     <div className="p-6 flex flex-col items-center justify-center border border-dashed border-zinc-800 rounded bg-zinc-950/30">
                       <div className="text-zinc-600 font-mono text-[10px] font-black uppercase tracking-widest">No Active Assets</div>
                       <div className="text-zinc-700 text-[10px] mt-2 font-mono">This operational asset holds 0 inventory units.</div>
                     </div>
                   )}
+
+                  {/* Manual Assignment UI */}
+                  <div className="mt-2">
+                    {isAssigningJar ? (
+                      <div className="flex flex-col gap-3 p-4 bg-zinc-950 border border-cyan-400/30 rounded shadow-[0_0_15px_rgba(34,211,238,0.05)]">
+                         <div className="text-[10px] font-black text-cyan-400 uppercase tracking-widest flex items-center justify-between">
+                            Manual Assignment
+                            <button onClick={() => setIsAssigningJar(false)}><FiX size={14}/></button>
+                         </div>
+                         <div className="flex gap-2">
+                           <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded flex overflow-hidden">
+                             <span className="p-3 text-[10px] font-mono text-zinc-600 border-r border-zinc-800 bg-black">ID:</span>
+                             <input 
+                               value={newJarId}
+                               onChange={(e) => setNewJarId(e.target.value)}
+                               placeholder="e.g. 0042"
+                               className="bg-transparent border-none outline-none p-3 text-white font-mono text-sm w-full"
+                               onKeyDown={(e) => e.key === 'Enter' && handleAssignJar()}
+                             />
+                           </div>
+                           <button 
+                             disabled={isProcessingJar || !newJarId.trim()}
+                             onClick={handleAssignJar}
+                             className="bg-cyan-400 text-black px-4 font-black text-[10px] uppercase tracking-widest rounded hover:bg-cyan-300 disabled:opacity-50 transition-all"
+                           >
+                             <FiCheck size={16}/>
+                           </button>
+                         </div>
+                         <p className="text-[9px] text-zinc-600 font-mono italic">Format: Numbers (e.g. 0042) or HEX string.</p>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => setIsAssigningJar(true)}
+                        className="w-full py-4 border border-dashed border-zinc-800 hover:border-cyan-400/50 text-zinc-600 hover:text-cyan-400 transition-all rounded text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3"
+                      >
+                         <FiPlus /> Deploy Physical Asset (Assign Jar)
+                      </button>
+                    )}
+                  </div>
                </div>
 
             </div>

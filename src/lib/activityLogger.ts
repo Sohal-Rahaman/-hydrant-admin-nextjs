@@ -20,6 +20,9 @@ export type ActivityAction =
   | 'USER_EDITED_BY_ADMIN'
   | 'STAFF_ADDED'
   | 'STAFF_UPDATED'
+  | 'JAR_MANUAL_RETURN'
+  | 'JAR_MANUAL_LOCK'
+  | 'JAR_MANUAL_ASSIGN'
   | 'OTHER';
 
 export interface LogActivityParams {

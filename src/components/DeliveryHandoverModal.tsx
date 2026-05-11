@@ -3,7 +3,8 @@ import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FiX, FiPlus, FiMinus, FiCheckCircle, FiDollarSign, 
-  FiCamera, FiPackage, FiInfo, FiChevronRight, FiChevronLeft, FiTrash2, FiMaximize, FiRefreshCw
+  FiCamera, FiPackage, FiInfo, FiChevronRight, FiChevronLeft, FiTrash2, FiMaximize, FiRefreshCw,
+  FiAlertTriangle
 } from 'react-icons/fi';
 import { Html5Qrcode } from 'html5-qrcode';
 import { db } from '@/lib/firebase';
@@ -99,6 +100,7 @@ const ActionButton = styled.button<{ $variant?: 'primary' }>`
 // --- Props ---
 interface Props {
   order: any;
+  user?: any;
   walletBalance?: number;
   onClose: () => void;
   onComplete: (data: any) => Promise<void>;
@@ -127,7 +129,7 @@ const ScannedItem = styled.div<{ $type: 'delivered' | 'collected' }>`
   }
 `;
 
-export const DeliveryHandoverModal: React.FC<Props> = ({ order, walletBalance = 0, onClose, onComplete, processing }) => {
+export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBalance = 0, onClose, onComplete, processing }) => {
   const [step, setStep] = useState(1);
   const [showRaw, setShowRaw] = useState(false);
   
@@ -223,7 +225,10 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, walletBalance = 
         }
       } else if (step === 2) {
         // For collection: jar MUST be locked AND locked to THIS order's customer
-        const orderCustomerId = order?.customerId || order?.userId;
+        // FIX: Check both UID and CustomerID (HYDRA-XXXX) for identity-aware validation
+        const uid = user?.id || order?.userId;
+        const cid = user?.customerId || order?.customerId;
+
         if (!jarData || jarData.status !== 'locked') {
           setScanStatus('error');
           setLastScanned(`${id} not locked`);
@@ -232,11 +237,14 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, walletBalance = 
           playErrorBeep();
           return;
         }
-        if (jarData.currentOwnerId !== orderCustomerId) {
+
+        const isOwnerMatch = (jarData.currentOwnerId === uid) || (cid && jarData.currentOwnerId === cid);
+
+        if (!isOwnerMatch) {
           setScanStatus('error');
-          setLastScanned(`${id} wrong user`);
-          setScanError(`${id} belongs to a different customer (${jarData.currentOwnerId}), not this order`);
-          setTimeout(() => { setScanStatus(null); setScanError(null); }, 3000);
+          setLastScanned(`${id} owner mismatch`);
+          setScanError(`${id} belongs to ${jarData.currentOwnerId}, but current customer is ${cid || uid}`);
+          setTimeout(() => { setScanStatus(null); setScanError(null); }, 4000);
           playErrorBeep();
           return;
         }
@@ -250,25 +258,26 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, walletBalance = 
     setLastScanned(id);
     setScanError(null);
     
-    // Success audio + haptic
-    playSuccessBeep();
-    
     if (step === 1) {
       setDeliveredJarIds(prev => {
         if (prev.includes(id)) {
           setScanStatus('duplicate');
+          playErrorBeep();
           return prev;
         }
         setScanStatus('success');
+        playSuccessBeep();
         return [...prev, id];
       });
     } else if (step === 2) {
       setCollectedJarIds(prev => {
         if (prev.includes(id)) {
           setScanStatus('duplicate');
+          playErrorBeep();
           return prev;
         }
         setScanStatus('success');
+        playSuccessBeep();
         return [...prev, id];
       });
     }
@@ -417,22 +426,42 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, walletBalance = 
                   <ScannerContainer>
                     <div id="handover-qr-reader" style={{ width: '100%', height: '100%' }} />
                     
+                    {/* Full Container Visual Flash Feedback */}
+                    <AnimatePresence>
+                      {scanStatus && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 0.2 }}
+                          exit={{ opacity: 0 }}
+                          style={{
+                            position: 'absolute', inset: 0, zIndex: 15, pointerEvents: 'none',
+                            background: scanStatus === 'success' ? '#10B981' : scanStatus === 'duplicate' ? '#F59E0B' : '#EF4444'
+                          }}
+                        />
+                      )}
+                    </AnimatePresence>
+
                     {/* Visual Overlay for Scan Feedback */}
                     <AnimatePresence>
                       {scanStatus && (
                         <motion.div 
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
+                          initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, scale: 1.1 }}
                           style={{
                             position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
-                            background: scanStatus === 'success' ? '#10B981' : '#EF4444',
-                            color: '#fff', padding: '8px 16px', borderRadius: '20px',
-                            fontSize: '12px', fontWeight: '800', zIndex: 20,
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                            background: scanStatus === 'success' ? '#10B981' : scanStatus === 'duplicate' ? '#F59E0B' : '#EF4444',
+                            color: '#000', padding: '8px 16px', borderRadius: '20px',
+                            fontSize: '12px', fontWeight: '900', zIndex: 20,
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                            display: 'flex', alignItems: 'center', gap: '8px',
+                            textTransform: 'uppercase', letterSpacing: '0.05em'
                           }}
                         >
-                          {scanStatus === 'success' ? `Added: ${lastScanned}` : scanStatus === 'error' ? `Invalid: ${lastScanned}` : `Already Scanned: ${lastScanned}`}
+                          {scanStatus === 'success' && <FiCheckCircle size={14}/>}
+                          {scanStatus === 'duplicate' && <FiAlertTriangle size={14}/>}
+                          {scanStatus === 'error' && <FiX size={14}/>}
+                          <span>{scanStatus === 'success' ? `Added: ${lastScanned}` : scanStatus === 'error' ? `REJECTED: ${lastScanned}` : `Duplicate: ${lastScanned}`}</span>
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -462,10 +491,15 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, walletBalance = 
                     const parsedInput = input.value.trim();
                     if (parsedInput) {
                       let finalId = parsedInput;
+                      // Smart Helper: If number only, pad to 4 digits and add prefix
                       if (/^\d+$/.test(parsedInput)) {
                         finalId = `HYD-JAR-${parsedInput.padStart(4, '0')}`;
-                      } else if (!parsedInput.startsWith('HYD-JAR-')) {
-                        finalId = `HYD-JAR-${parsedInput}`;
+                      } 
+                      // If partial or no prefix, normalize it
+                      else if (!parsedInput.toUpperCase().startsWith('HYD-JAR-')) {
+                         finalId = `HYD-JAR-${parsedInput.toUpperCase()}`;
+                      } else {
+                         finalId = parsedInput.toUpperCase();
                       }
                       handleScanSuccess(finalId);
                       input.value = '';
@@ -560,10 +594,15 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, walletBalance = 
                     const parsedInput = input.value.trim();
                     if (parsedInput) {
                       let finalId = parsedInput;
+                      // Smart Helper: If number only, pad to 4 digits and add prefix
                       if (/^\d+$/.test(parsedInput)) {
                         finalId = `HYD-JAR-${parsedInput.padStart(4, '0')}`;
-                      } else if (!parsedInput.startsWith('HYD-JAR-')) {
-                        finalId = `HYD-JAR-${parsedInput}`;
+                      } 
+                      // If partial or no prefix, normalize it
+                      else if (!parsedInput.toUpperCase().startsWith('HYD-JAR-')) {
+                         finalId = `HYD-JAR-${parsedInput.toUpperCase()}`;
+                      } else {
+                         finalId = parsedInput.toUpperCase();
                       }
                       handleScanSuccess(finalId);
                       input.value = '';

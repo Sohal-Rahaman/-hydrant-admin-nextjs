@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { FiPhone, FiMessageCircle, FiBox, FiUsers, FiSearch, FiStar, FiClock, FiDollarSign, FiActivity, FiAlertCircle } from 'react-icons/fi';
-import { subscribeToCollection } from '@/lib/firebase';
+import { subscribeToCollection, normalizeUser } from '@/lib/firebase';
 import UserInsightDrawer from '@/components/UserInsightDrawer';
 
 // Interfaces
@@ -76,13 +76,7 @@ export default function CRMScreen() {
     const unsubUsers = subscribeToCollection('users', (snapshot) => {
       const formatted = snapshot.docs.map(doc => {
         const d = doc.data();
-        return {
-          id: doc.id,
-          ...d,
-          phoneNumber: d.phoneNumber || d.phone || '',
-          wallet_balance: d.wallet_balance ?? d.walletBalance ?? 0,
-          jars_occupied: d.jars_occupied ?? d.jarHold ?? d.occupiedJars ?? 0,
-        };
+        return normalizeUser({ id: doc.id, ...d });
       });
       setUsers(formatted as User[]);
       if (orders.length > 0 || formatted.length > 0) setLoading(false);
@@ -172,11 +166,11 @@ export default function CRMScreen() {
   let currentSegment = segmentation[activeTab] || [];
   if (search) {
     const q = search.toLowerCase();
-    currentSegment = currentSegment.filter(u => {
-      const name = (u.full_name || u.name || u.firstName || '').toLowerCase();
-      const cId = (u.customerId || '').toLowerCase();
-      const phone = (u.phone || u.phoneNumber || '').toLowerCase();
-      return name.includes(q) || cId.includes(q) || phone.includes(q);
+    currentSegment = currentSegment.filter((u: any) => {
+      const name = (u.displayName || '').toLowerCase();
+      const cid = (u.customerId || '').toLowerCase();
+      const phone = (u.displayPhone || '').toLowerCase();
+      return name.includes(q) || cid.includes(q) || phone.includes(q);
     });
   }
 
@@ -288,8 +282,8 @@ export default function CRMScreen() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-900">
-                {currentSegment.map((user) => {
-                  const name = user.full_name || user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
+                {currentSegment.map((user: any) => {
+                  const name = user.displayName;
                   return (
                     <tr 
                       key={user.id} 

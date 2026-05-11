@@ -1,22 +1,22 @@
-const functions = require('firebase-functions');
+const functions = require('firebase-functions/v1');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 
-const db = admin.firestore();
+// DB initialization moved inside functions
 const REWARD_AMOUNT = 37;
 const EXPIRY_DAYS = 30;
 
 /**
- * Stage 2: First order placed → referral: pending → processing
- * Trigger: orders/{orderId} onCreate
+ * Stage 2: First order placed → referral: pending → processing (Gen 2)
  */
-exports.onOrderCreated = functions.firestore
-  .document('orders/{orderId}')
-  .onCreate(async (snap, context) => {
-    const order = snap.data();
+exports.onOrderCreated = onDocumentCreated({ document: 'orders/{orderId}', region: 'us-central1' }, async (event) => {
+    const db = admin.firestore();
+    const order = event.data.data();
     if (!order || !order.userId) return null;
 
     const userId = order.userId;
-    const orderId = context.params.orderId;
+    const orderId = event.params.orderId;
 
     // Check how many orders this user has total
     const ordersSnap = await db.collection('orders')
@@ -47,20 +47,18 @@ exports.onOrderCreated = functions.firestore
   });
 
 /**
- * Stage 3: First order delivered → atomic batch reward
- * Trigger: orders/{orderId} onUpdate where status → 'delivered'
+ * Stage 3: First order delivered → atomic batch reward (Gen 2)
  */
-exports.onOrderDelivered = functions.firestore
-  .document('orders/{orderId}')
-  .onUpdate(async (change, context) => {
-    const before = change.before.data();
-    const after = change.after.data();
+exports.onOrderDelivered = onDocumentUpdated({ document: 'orders/{orderId}', region: 'us-central1' }, async (event) => {
+    const db = admin.firestore();
+    const before = event.data.before.data();
+    const after = event.data.after.data();
 
     const wasDelivered = before.status !== 'delivered' && after.status === 'delivered';
     if (!wasDelivered || !after.userId) return null;
 
     const userId = after.userId;
-    const orderId = context.params.orderId;
+    const orderId = event.params.orderId;
 
     // Find referral doc for this user that is in 'processing' with this orderId
     const refSnap = await db.collection('referrals')
@@ -127,20 +125,18 @@ exports.onOrderDelivered = functions.firestore
   });
 
 /**
- * Edge case: First order cancelled → snap back processing → pending
- * Trigger: orders/{orderId} onUpdate where status → 'cancelled'
+ * Edge case: First order cancelled → snap back processing → pending (Gen 2)
  */
-exports.onOrderStatusChange = functions.firestore
-  .document('orders/{orderId}')
-  .onUpdate(async (change, context) => {
-    const before = change.before.data();
-    const after = change.after.data();
+exports.onOrderStatusChange = onDocumentUpdated({ document: 'orders/{orderId}', region: 'us-central1' }, async (event) => {
+    const db = admin.firestore();
+    const before = event.data.before.data();
+    const after = event.data.after.data();
 
     const wasCancelled = after.status === 'cancelled' && before.status !== 'delivered';
     if (!wasCancelled || !after.userId) return null;
 
     const userId = after.userId;
-    const orderId = context.params.orderId;
+    const orderId = event.params.orderId;
 
     // Find referral doc in processing with this order
     const refSnap = await db.collection('referrals')
@@ -164,12 +160,10 @@ exports.onOrderStatusChange = functions.firestore
   });
 
 /**
- * Expiry: Daily job — flip pending referrals older than 30 days to 'expired'
- * Schedule: every 24 hours
+ * Expiry: Daily job — flip pending referrals older than 30 days to 'expired' (Gen 2)
  */
-exports.dailyReferralExpiry = functions.pubsub
-  .schedule('every 24 hours')
-  .onRun(async () => {
+exports.dailyReferralExpiry = onSchedule({ schedule: 'every 24 hours', region: 'us-central1' }, async (event) => {
+    const db = admin.firestore();
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - EXPIRY_DAYS);
 

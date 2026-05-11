@@ -3,6 +3,7 @@ import { db } from '@/lib/firebase';
 import { runTransaction, doc, collection, Timestamp } from 'firebase/firestore';
 import { sendEmail } from '@/lib/email';
 import { executeWalletUpdate } from '@/lib/wallet';
+import { slackNotify } from '@/lib/slack';
 
 export async function POST(request: Request) {
   try {
@@ -22,6 +23,7 @@ export async function POST(request: Request) {
     let finalBalance = 0;
     let userName = 'Customer';
     let userEmail = '';
+    let finalAddress = address || '';
     let insufficientFunds = false;
 
     // ATOMIC TRANSACTION: Read Wallet -> Deduct (Allow Negative) -> Record Txn -> Create Order
@@ -34,6 +36,7 @@ export async function POST(request: Request) {
       const userData = userDoc.data();
       userName = userData.name || userData.displayName || 'Customer';
       userEmail = userData.email || '';
+      finalAddress = address || userData.address || '';
 
       // 1. Deduct Wallet using Ledger Helper (Allowing negative balance)
       const { new_balance } = await executeWalletUpdate(transaction, {
@@ -57,7 +60,7 @@ export async function POST(request: Request) {
         totalCost: totalCost,
         status: 'confirmed',
         paymentMethod: 'wallet',
-        address: address || userData.address || '',
+        address: finalAddress,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       };
@@ -78,6 +81,14 @@ export async function POST(request: Request) {
       );
     }
 
+    // 🚀 Fire Slack Notification Async (doesn't block user response)
+    slackNotify.newOrder({
+      orderId: newOrderRef.id,
+      customerName: userName,
+      address: finalAddress,
+      total: totalCost,
+      items: `${quantity} x 20L Hydrant Jars`
+    });
 
     // Success response
     return NextResponse.json({ 
