@@ -1,0 +1,97 @@
+
+> hydrant-admin-nextjs@0.1.0 build
+> next build
+
+⚠ `eslint` configuration in next.config.ts is no longer supported. See more info here: https://nextjs.org/docs/app/api-reference/cli/next#next-lint-options
+⚠ Invalid next.config.ts options detected: 
+⚠     Unrecognized key(s) in object: 'eslint'
+⚠ See more info here: https://nextjs.org/docs/messages/invalid-next-config
+▲ Next.js 16.2.4 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 12.1s
+  Skipping validation of types
+  Finished TypeScript config validation in 37ms ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/68) ...
+  Generating static pages using 7 workers (17/68) 
+  Generating static pages using 7 workers (34/68) 
+  Generating static pages using 7 workers (51/68) 
+✓ Generating static pages using 7 workers (68/68) in 1488ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /admin
+├ ○ /admin/activity
+├ ○ /admin/admins
+├ ○ /admin/analytics
+├ ○ /admin/army
+├ ○ /admin/coupons
+├ ○ /admin/create-order
+├ ○ /admin/crm
+├ ○ /admin/customers
+├ ○ /admin/deletion-requests
+├ ○ /admin/delivery
+├ ○ /admin/dev
+├ ○ /admin/dev/admin-activity
+├ ○ /admin/dev/api-logs
+├ ○ /admin/dev/app-versions
+├ ○ /admin/dev/db-activity
+├ ○ /admin/dev/debug-console
+├ ○ /admin/dev/delivery-failures
+├ ○ /admin/dev/device-sessions
+├ ○ /admin/dev/error-logs
+├ ○ /admin/dev/failed-payments
+├ ○ /admin/dev/notification-logs
+├ ○ /admin/dev/order-failures
+├ ○ /admin/dev/payments
+├ ○ /admin/dev/refund-logs
+├ ○ /admin/dev/security-logs
+├ ○ /admin/dev/server-perf
+├ ○ /admin/dev/subscription-logs
+├ ○ /admin/dev/user-activity
+├ ○ /admin/dev/wallet-txns
+├ ○ /admin/dues
+├ ○ /admin/expenses
+├ ○ /admin/finance
+├ ○ /admin/fleet
+├ ○ /admin/jars
+├ ○ /admin/jars/qr-print
+├ ○ /admin/kyc
+├ ○ /admin/notifications
+├ ○ /admin/orders
+├ ○ /admin/pro-analytics
+├ ○ /admin/pro-control
+├ ○ /admin/referrals
+├ ○ /admin/scanner
+├ ○ /admin/settings/integrations
+├ ○ /admin/support
+├ ○ /admin/trials
+├ ○ /admin/users
+├ ○ /admin/wallet
+├ ƒ /api/auth/whatsapp/send
+├ ƒ /api/auth/whatsapp/verify
+├ ƒ /api/cron/billing-trigger
+├ ƒ /api/cron/lifecycle-eval
+├ ƒ /api/cron/sync-zoho-sheet
+├ ƒ /api/init-dashboard-stats
+├ ƒ /api/orders/cancel
+├ ƒ /api/orders/create
+├ ƒ /api/update-dashboard-stats
+├ ƒ /api/zoho/auth
+├ ƒ /api/zoho/create-sheet
+├ ƒ /api/zoho/exchange
+├ ƒ /api/zoho/generate-invoice
+├ ƒ /api/zoho/sync-all-customers
+├ ƒ /api/zoho/sync-customer
+├ ƒ /api/zoho/sync-statements
+├ ○ /debug
+└ ○ /oauth/callback
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

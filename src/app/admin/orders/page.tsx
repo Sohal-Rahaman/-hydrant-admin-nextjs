@@ -12,6 +12,19 @@ import {
   FiCheckCircle, FiPackage, FiDroplet, FiDownload, FiChevronUp, 
   FiChevronDown, FiBarChart2, FiRefreshCcw, FiCalendar
 } from 'react-icons/fi';
+import { 
+  Phone, 
+  Navigation, 
+  X, 
+  User, 
+  Package, 
+  Clock, 
+  MapPin, 
+  Wallet, 
+  ChevronRight,
+  CheckCircle,
+  AlertCircle
+} from 'lucide-react';
 import { subscribeToCollection, updateDocument, db, assignJarToCustomer, returnJar, subscribeToLiveStatus } from '@/lib/firebase';
 import UserInsightDrawer from '@/components/UserInsightDrawer';
 import { normalizeOrderStatus } from '@/lib/orderStatus';
@@ -538,81 +551,111 @@ const MobSeqBadge = styled.div<{ $status: 'active' | 'next' | 'std' }>`
   ${p => p.$status === 'std' && 'background: #EDF2F7; color: #4A5568;'}
 `;
 
-const MobOrderCard = styled.div<{ $active?: boolean }>`
-  background: #ffffff;
-  border-radius: 20px;
-  border: 1px solid ${p => p.$active ? '#0F6E56' : '#E2E8F0'};
-  padding: 18px 20px;
-  margin-bottom: 16px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
-  ${p => p.$active && 'box-shadow: 0 12px 32px rgba(15,110,86,0.12); border-left: 6px solid #0F6E56;'}
+const MobOrderCard = styled(motion.div)<{ $fast?: boolean }>`
+  background: #fff;
+  border-radius: 28px;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.02);
+  border: 1px solid #F1F5F9;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  ${props => props.$fast && `
+    border: 2px solid #EF444440;
+    background: linear-gradient(to bottom right, #fff, #FFF5F5);
+  `}
+  &:active {
+    transform: scale(0.98);
+  }
 `;
 
 const MobCardTitle = styled.div`
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 800;
   color: #111827;
+  letter-spacing: -0.02em;
   line-height: 1.2;
-  margin-bottom: 4px;
 `;
 
 const MobCardAddress = styled.div`
-  font-size: 15px;
+  font-size: 14px;
   color: #4B5563;
-  line-height: 1.5;
-  margin: 10px 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-`;
-
-const MobDetailRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   margin-top: 10px;
+  line-height: 1.5;
+  font-weight: 500;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 `;
 
 const MobActionGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid #F1F5F9;
+  margin-top: 24px;
 `;
 
-const BigActionBtn = styled.button<{ $variant?: 'call' | 'nav' | 'done' | 'cancel' }>`
+const BigActionBtn = styled.button<{ $variant: 'call' | 'nav' | 'done' | 'cancel' }>`
+  height: 58px;
+  border-radius: 18px;
+  border: none;
+  font-size: 15px;
+  font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  height: 52px;
-  border-radius: 14px;
-  font-weight: 800;
-  font-size: 15px;
-  border: none;
-  transition: all 0.2s ease;
   cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'Outfit', sans-serif;
+  
+  ${props => props.$variant === 'call' && `
+    background: #DCFCE7;
+    color: #166534;
+    border: 1px solid #BBF7D0;
+  `}
+  ${props => props.$variant === 'nav' && `
+    background: #DBEAFE;
+    color: #1E40AF;
+    border: 1px solid #BFDBFE;
+  `}
+  ${props => props.$variant === 'done' && `
+    background: #111827;
+    color: #fff;
+    grid-column: 1 / -1;
+  `}
+  ${props => props.$variant === 'cancel' && `
+    background: #FFF1F2;
+    color: #9F1239;
+    border: 1px solid #FECDD3;
+    grid-column: 1 / -1;
+    height: 48px;
+    margin-top: 8px;
+    font-size: 13px;
+    opacity: 0.8;
+  `}
+`;
 
-  &:active { transform: scale(0.96); }
+const MobDetailRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+`;
 
-  ${p => p.$variant === 'call' && `
-    background: #DCFCE7; color: #166534; border: 1px solid #16653430;
-    &:active { background: #BBF7D0; }
-  `}
-  ${p => p.$variant === 'nav' && `
-    background: #DBEAFE; color: #1E40AF; border: 1px solid #1E40AF30;
-    &:active { background: #BFDBFE; }
-  `}
-  ${p => p.$variant === 'done' && `
-    background: #111827; color: #FFFFFF; grid-column: span 2; height: 58px; font-size: 17px;
-    box-shadow: 0 4px 12px rgba(17,24,39,0.2);
-  `}
-  ${p => p.$variant === 'cancel' && `
-    background: #FEE2E2; color: #991B1B; border: 1px solid #991B1B30;
-  `}
+const TacticalBadge = styled.div<{ $color?: string; $bg?: string }>`
+  padding: 6px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: ${props => props.$bg || '#F1F5F9'};
+  color: ${props => props.$color || '#64748B'};
 `;
 
 const MobDivider = styled.div`
@@ -825,6 +868,7 @@ export default function OrdersPage() {
   const [selectedUserForDrawer, setSelectedUserForDrawer] = useState<any>(null);
   const [isUserDrawerOpen, setIsUserDrawerOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<'queue'|'map'|'done'>('queue');
+  const [cancelConfirm, setCancelConfirm] = useState<string|null>(null);
   const searchParams = useSearchParams();
   const orderIdParam = searchParams.get('orderId');
   const router = useRouter();
@@ -1127,62 +1171,93 @@ export default function OrdersPage() {
     const isDone = currentStatus === 'completed' || currentStatus === 'delivered';
 
     return (
-      <MobOrderCard key={o.id} $active={isFast && idx === 0}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-           <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-                {!isDone && <MobSeqBadge $status={isFast && idx === 0 ? 'active' : 'std'}>{seqOffset + idx + 1}</MobSeqBadge>}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <MobCardTitle 
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => router.push('/admin/users?customerId=' + o.userId)}
-                  >
-                    {getName(o, user)}
-                  </MobCardTitle>
-                  {user?.customerId && (
-                    <span style={{ fontSize: 10, fontWeight: 900, color: '#0F6E56', background: 'rgba(15,110,86,0.1)', padding: '2px 8px', borderRadius: 6, display: 'inline-block' }}>
-                      #{user.customerId}
-                    </span>
-                  )}
-                </div>
-              </div>
+      <MobOrderCard 
+        key={o.id} 
+        $fast={isFast}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: idx * 0.05 }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+           <div style={{ background: isFast ? '#EF4444' : '#0F6E56', color: '#fff', fontSize: 10, fontWeight: 900, padding: '4px 10px', borderRadius: 8, letterSpacing: '0.05em' }}>
+             {isFast ? 'FAST TRACK' : `STOP #${seqOffset + idx + 1}`}
            </div>
-           {o.deliverySlot && (
-              <Tag $clr={o.deliverySlot.toLowerCase().includes('morning') ? '#F59E0B' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#3B82F6' : '#8B5CF6'} style={{ fontSize: 11, fontWeight: 800 }}>
-                {o.deliverySlot}
-              </Tag>
-           )}
+           <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 10, color: '#64748B', fontWeight: 800 }}>{o.id}</div>
+              <div style={{ fontSize: 18, fontWeight: 900, color: '#10B981' }}>₹{o.amount || (o.quantity * 37)}</div>
+           </div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div 
+              style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+              onClick={() => router.push('/admin/users?customerId=' + o.userId)}
+            >
+              <MobCardTitle style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {getName(o, user)}
+              </MobCardTitle>
+              <ChevronRight size={20} color="#64748B" />
+            </div>
+            {user?.customerId && (
+              <TacticalBadge $bg="rgba(15,110,86,0.1)" $color="#0F6E56" style={{ borderRadius: 8 }}>
+                #{user.customerId}
+              </TacticalBadge>
+            )}
+          </div>
         </div>
 
         <MobCardAddress>
-          {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address Provided'}
+          <MapPin size={18} color="#3B82F6" style={{ flexShrink: 0 }} />
+          <span>{o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address Provided'}</span>
         </MobCardAddress>
 
         <MobDetailRow>
-          <Tag $clr="#111827" style={{ fontSize: 11, fontWeight: 900, padding: '4px 10px' }}>
-             {o.quantity} Jars × 20L
-          </Tag>
-          {o.paymentMethod && (
-            <Tag $clr={PM_COLOR[o.paymentMethod] || '#666'} style={{ fontSize: 11, fontWeight: 900, padding: '4px 10px' }}>
-              <span style={{ opacity: 0.7, marginRight: 4 }}>{o.paymentMethod.toUpperCase()}</span>
-              {(['wallet', 'upi', 'razorpay'].includes(o.paymentMethod)) && '• PAID'}
-            </Tag>
+          <TacticalBadge $bg="#111827" $color="#fff">
+            <Package size={14} />
+            {o.quantity} Jars × 20L
+          </TacticalBadge>
+          
+          {o.deliverySlot && (
+             <TacticalBadge 
+               $bg={o.deliverySlot.toLowerCase().includes('morning') ? '#FEF3C7' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#DBEAFE' : '#F3E8FF'} 
+               $color={o.deliverySlot.toLowerCase().includes('morning') ? '#92400E' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#1E40AF' : '#6B21A8'}
+             >
+               <Clock size={14} />
+               {o.deliverySlot}
+             </TacticalBadge>
           )}
-          <Tag style={{ fontSize: 11, fontWeight: 800, padding: '4px 10px', background: '#F1F5F9', color: '#64748B' }}>
-            {o.plusCode || '#NO-PLUS-CODE'}
-          </Tag>
+
+          <TacticalBadge $bg="#F1F5F9" $color="#64748B">
+            <MapPin size={14} />
+            {o.plusCode || 'NO PLUS CODE'}
+          </TacticalBadge>
+
+          {o.paymentMethod && (
+            <TacticalBadge 
+              $bg={PM_COLOR[o.paymentMethod] || '#F1F5F9'} 
+              $color="#fff"
+              style={{ background: (['wallet', 'upi', 'razorpay'].includes(o.paymentMethod.toLowerCase())) ? '#8B5CF6' : (o.paymentMethod.toLowerCase() === 'cash' ? '#10B981' : '#F59E0B') }}
+            >
+              <Wallet size={14} />
+              {o.paymentMethod.toUpperCase()} {(['wallet', 'upi', 'razorpay'].includes(o.paymentMethod.toLowerCase())) && '• PAID'}
+            </TacticalBadge>
+          )}
         </MobDetailRow>
 
         {!isDone && (
           <MobActionGrid>
             <BigActionBtn $variant="call" onClick={() => handleCall(phone)}>
-              <FiPhone size={20} /> Call
+              <Phone size={22} /> Call
             </BigActionBtn>
             <BigActionBtn $variant="nav" onClick={() => handleNavigation(o)}>
-              <FiNavigation size={20} /> Map
+              <Navigation size={22} /> Map
             </BigActionBtn>
             <BigActionBtn $variant="done" onClick={() => handleDeliveryClick(o)}>
-              <FiCheckCircle size={22} /> MARK AS DELIVERED
+              <CheckCircle size={24} /> MARK AS DELIVERED
+            </BigActionBtn>
+            <BigActionBtn $variant="cancel" onClick={() => handleCancelOrder(o.id)}>
+              <X size={18} /> Cancel Order
             </BigActionBtn>
           </MobActionGrid>
         )}
@@ -1218,6 +1293,32 @@ export default function OrdersPage() {
     window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(dest)}`,'_blank');
   };
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const handleCancelOrder = (orderId: string) => {
+    setCancelConfirm(orderId);
+  };
+
+  const confirmCancel = async (orderId: string) => {
+    setProcessing(true);
+    try {
+      await updateDocument('orders', orderId, { 
+        status: 'cancelled', 
+        cancelledAt: new Date(),
+        updatedAt: new Date(),
+        cancellationReason: 'Cancelled by Admin from Mobile View'
+      });
+      await logActivity({
+        action: 'ORDER_CANCELLED', actor: 'ADMIN', actorName: 'Admin', actorId: userAuth?.uid || 'admin',
+        details: `Cancelled order #${orderId}`, targetId: orderId
+      });
+      setCancelConfirm(null);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to cancel order');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleDeliveryClick=(o:Order)=>{ setSelectedOrder(o); setShowModal(true); };
 
   const handleBulkCancelAll = async (targetOrders: Order[]) => {
@@ -2521,6 +2622,34 @@ export default function OrdersPage() {
                   <MActionBtn $primary style={{width:'100%',justifyContent:'center',padding:14,fontSize:'1rem'}}
                     onClick={()=>{ setShowQRModal(false); handleDeliveryClick(selectedQRCodeOrder); }}>
                     <FiCheckCircle size={18}/> Proceed to Deliver
+                  </MActionBtn>
+                </div>
+              </MBody>
+            </ModalBox>
+          </ModalBg>
+        )}
+        {cancelConfirm && (
+          <ModalBg initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
+            <ModalBox initial={{scale:.9,opacity:0}} animate={{scale:1,opacity:1}} exit={{scale:.9,opacity:0}} style={{maxWidth:400}}>
+              <MClose onClick={() => setCancelConfirm(null)}><FiX/></MClose>
+              <MHead>
+                <MTitle style={{color: '#EF4444'}}><FiAlertTriangle /> Cancel Order?</MTitle>
+              </MHead>
+              <MBody>
+                <p style={{ color: '#475569', fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
+                  Are you sure you want to cancel order <strong>#{cancelConfirm}</strong>? 
+                  This will remove it from the active delivery queue. This action cannot be undone.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <MActionBtn onClick={() => setCancelConfirm(null)} style={{ justifyContent: 'center' }}>
+                    Keep Order
+                  </MActionBtn>
+                  <MActionBtn 
+                    $primary 
+                    style={{ background: '#EF4444', color: '#fff', border: 'none', justifyContent: 'center' }}
+                    onClick={() => confirmCancel(cancelConfirm)}
+                  >
+                    Cancel Order
                   </MActionBtn>
                 </div>
               </MBody>
