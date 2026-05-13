@@ -1,8 +1,9 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { auth, logOut, SUPERADMIN_PHONES, getAdminDataByPhone, StaffMember } from '@/lib/firebase';
+import { auth, logOut, SUPERADMIN_PHONES, getAdminDataByPhone, StaffMember, db } from '@/lib/firebase';
 import { onAuthStateChanged, User, ConfirmationResult } from 'firebase/auth';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -86,6 +87,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Grant all permissions to any active admin to satisfy "100% access" requirement
       setPermissions(['all']); 
       setStaffData(adminRecord);
+
+      // ─── AUTO-HEAL PERMISSIONS ──────────────────────────────────────────
+      // If Firestore Rules are failing, it's usually because the flag is missing in 'users'
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists() && userDoc.data().isAdmin !== true) {
+          await updateDoc(userRef, { isAdmin: true });
+          console.log(`🔑 Auto-synced Firestore Admin flag for ${normalizedRaw}`);
+        }
+      } catch (err) {
+        console.warn('⚠️ Auto-heal permissions failed (Likely due to rules already blocking it):', err);
+      }
+      // ───────────────────────────────────────────────────────────────────
+
       return true;
     }
 
@@ -96,6 +112,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setIsAdmin(true);
       setRole('superadmin');
       setPermissions(['all']); // Grant all permissions to hardcoded superadmins
+
+      // Auto-heal for superadmins too
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists() && userDoc.data().isAdmin !== true) {
+          await updateDoc(userRef, { isAdmin: true });
+          console.log(`💎 Auto-synced SuperAdmin flag for ${normalizedRaw}`);
+        }
+      } catch (err) {}
+
       return true;
     }
 

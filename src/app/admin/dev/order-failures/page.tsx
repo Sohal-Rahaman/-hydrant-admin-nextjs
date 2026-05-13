@@ -16,10 +16,10 @@ export default function OrderFailures() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const allOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const allOrders = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
       const failuresLogs = allOrders.filter((o: any) => ['canceled', 'cancelled', 'failed'].includes(o.status?.toLowerCase()));
       
-      const logs = failuresLogs.map(data => {
+      const logs = failuresLogs.map((data: any) => {
         return {
           id: data.id,
           customerId: data.customerName || data.userId || 'N/A',

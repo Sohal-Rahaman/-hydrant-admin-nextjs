@@ -28,10 +28,10 @@ export default function SubscriptionLogs() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const allLogs = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
       const subLogs = allLogs.filter((log: any) => log.event && log.event.startsWith('subscription.'));
       
-      const formatted = subLogs.map(log => {
+      const formatted = subLogs.map((log: any) => {
         const payload = log.payload?.subscription?.entity || {};
         return {
           id: payload.id || log.id,

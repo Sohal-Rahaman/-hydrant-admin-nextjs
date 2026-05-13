@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
-import { addDocument, updateDocument, getAllAdmins, getAllUsers, StaffMember, SUPERADMIN_PHONES, User } from '@/lib/firebase';
+import { addDocument, updateDocument, getAllAdmins, getAllUsers, StaffMember, SUPERADMIN_PHONES, User, db } from '@/lib/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { logActivity } from '@/lib/activityLogger';
 import { 
   FiShield, 
@@ -385,6 +386,13 @@ export default function AdminsPage() {
         };
 
         await addDocument('admins', staffData);
+        
+        // 4. Synchronize with users collection to satisfy Firestore Rules
+        if (matchingUser) {
+          await updateDocument('users', matchingUser.id, { isAdmin: true });
+          console.log(`🔑 Granted Firestore Admin access to ${staffData.name}`);
+        }
+
         console.log(`✅ Onboarded ${staffData.name} (${normalized})`);
       }
 
@@ -466,6 +474,17 @@ export default function AdminsPage() {
           phone: normalizedPhone,
           updatedAt: new Date()
         });
+        
+        // Sync isAdmin flag to users collection
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('phone', '==', normalizedPhone));
+        const userSnap = await getDocs(q);
+        
+        if (!userSnap.empty) {
+          const matchingUser = userSnap.docs[0];
+          await updateDocument('users', matchingUser.id, { isAdmin: formData.status === 'active' });
+        }
+
         await logActivity({
           action: 'STAFF_UPDATED',
           actor: 'ADMIN',
@@ -481,6 +500,17 @@ export default function AdminsPage() {
           createdAt: new Date(),
           addedBy: currentUser?.uid
         });
+        
+        // Synchronize with users collection for Firestore Rules
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('phone', '==', normalizedPhone));
+        const userSnap = await getDocs(q);
+        
+        if (!userSnap.empty) {
+          const matchingUser = userSnap.docs[0];
+          await updateDocument('users', matchingUser.id, { isAdmin: formData.status === 'active' });
+        }
+
         await logActivity({
           action: 'STAFF_ADDED',
           actor: 'ADMIN',

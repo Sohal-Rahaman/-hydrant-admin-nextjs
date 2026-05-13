@@ -12,7 +12,7 @@ export default function AppVersionMonitor() {
     const q = query(collection(db, 'dev_app_versions'), orderBy('timestamp', 'desc'), limit(100));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const liveLogs = snapshot.docs.map(doc => {
+      const liveLogs = snapshot.docs.map((doc: any) => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -39,7 +39,9 @@ export default function AppVersionMonitor() {
     return acc;
   }, {} as Record<string, number>);
 
-  const topVersions = Object.entries(versionCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const topVersions = (Object.entries(versionCounts) as [string, number][])
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4);
 
   return (
     <div style={{ background: '#0a0f1e', minHeight: '100vh', padding: '24px', fontFamily: 'monospace' }}>

@@ -403,13 +403,16 @@ export default function AnalyticsCommandCenter() {
         };
       }));
       setLoading(false);
+    }, [], (err) => {
+      console.error('❌ Analytics Orders subscription error:', err);
+      setLoading(false);
     });
     const unsub2 = subscribeToCollection('users', snap => {
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserDoc)));
-    });
+    }, [], (err) => console.error('❌ Analytics Users subscription error:', err));
     const unsub3 = subscribeToCollection('jars', snap => {
       setJars(snap.docs.map(d => ({ id: d.id, ...d.data() } as Jar)));
-    });
+    }, [], (err) => console.error('❌ Analytics Jars subscription error:', err));
     return () => { unsub1(); unsub2(); unsub3(); };
   }, []);
 

@@ -5,11 +5,12 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import styled, { keyframes, css } from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  FiSearch, FiPhone, FiNavigation, FiCheckCircle, FiRefreshCw,
-  FiX, FiZap, FiAlertTriangle, FiMapPin, FiClock, FiSun,
-  FiPackage, FiTruck, FiMoon, FiDroplet, FiDownload,
-  FiChevronUp, FiChevronDown, FiBarChart2, FiRefreshCcw, FiCalendar
+import { 
+  FiX, FiZap, FiAlertTriangle, FiMapPin, FiClock, FiSun, FiMoon, 
+  FiCoffee, FiChevronRight, FiPhone, FiCheck, FiFilter, FiRefreshCw,
+  FiArrowRight, FiMoreVertical, FiTruck, FiMap, FiSearch, FiNavigation,
+  FiCheckCircle, FiPackage, FiDroplet, FiDownload, FiChevronUp, 
+  FiChevronDown, FiBarChart2, FiRefreshCcw, FiCalendar
 } from 'react-icons/fi';
 import { subscribeToCollection, updateDocument, db, assignJarToCustomer, returnJar, subscribeToLiveStatus } from '@/lib/firebase';
 import UserInsightDrawer from '@/components/UserInsightDrawer';
@@ -22,18 +23,18 @@ import { DeliveryMap } from '@/components/DeliveryMap';
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface Order {
-  id: string; userId: string; userName?: string; userPhone?: string;
+  id: string; userId: string; userName?: string; userPhone?: string; phone?: string;
   customerName?: string;
   status: 'pending'|'processing'|'completed'|'cancelled'|'canceled'|'placed'|'confirmed'|'in_progress'|'out_for_delivery'|'delivered';
   quantity: number; amount: number;
-  address?: { street: string; city: string; pincode: string; full?: string };
+  address?: { street: string; city: string; pincode: string; full?: string; latitude?: number; longitude?: number };
   deliveryAddress?: { id?: string; type?: string; fullAddress?: string; address_line?: string; latitude?: number; longitude?: number };
   createdAt: Date|{toDate():Date}|string;
   orderType: 'regular'|'subscription';
   deliverySlot?: string; deliveryDate?: string|Date|{toDate():Date}|null;
   isPriority?: boolean; assignedPartner?: string; plusCode?: string;
   floorNumber?: string; hasLift?: boolean; isAddressVerified?: boolean;
-  bewareOfDogs?: boolean; paymentMethod?: 'cash'|'wallet'|'upi';
+  bewareOfDogs?: boolean; paymentMethod?: 'cash'|'wallet'|'upi'|'razorpay'|'card'|string;
   deliveryPartner?: { name: string; phone: string };
   updatedAt?: Date|{toDate():Date}|string;
   autoAssignAttempted?: boolean; priority?: number;
@@ -41,13 +42,17 @@ interface Order {
   items?: any[]; raw?: any;
   amountPaid?: number; deliveredJars?: number; collectedJars?: number;
   handover?: { deliveredJars:number; collectedJars:number; netChange:number; amountPaid?:number; proofImage?:string|null; notes?:string; completedAt:Date|{toDate():Date}|string };
+  [key: string]: any;
 }
-interface User { id:string; name:string; phoneNumber:string; wallet_balance:number; jars_occupied:number; customerId?:string; userId?:string }
+interface User { id:string; name:string; phoneNumber:string; wallet_balance:number; jars_occupied:number; customerId?:string; userId?:string; [key: string]: any; }
 interface ArmyMember { id:string; name:string; phoneNumber:string; isOnline:boolean; activeOrdersCount:number }
 
 /* ── Helpers ────────────────────────────────────────────────── */
 const getName = (order: Order, user?: any): string => {
-  return user?.name || user?.full_name || order.customerName || order.userName || 'Customer';
+  const n = user?.name || user?.full_name || order.customerName || order.userName || order.name || '';
+  if (n) return n;
+  if (order.userPhone || order.phone) return order.userPhone || order.phone || 'Customer';
+  return 'Customer #' + order.id.slice(-4).toUpperCase();
 };
 
 const getTs = (d:any):number => {
@@ -405,6 +410,14 @@ const PSel = styled.select`
 `;
 
 /* ── Slot section headers ── */
+const SlotSection = styled.div`margin-bottom:24px`;
+const SlotHead = styled.div<{ $clr: string }>`
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:0 4px;
+  .icon{color:${p=>p.$clr}}
+  .txt{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1A1A1A}
+  .badge{background:${p=>p.$clr}15;color:${p=>p.$clr};font-size:10px;font-weight:900;padding:2px 8px;border-radius:12px}
+  .ln{flex:1;height:1px;background:#E2E8F0}
+`;
 
 const MobileViewContainer = styled.div`
   @media(min-width:1024px){display:none}
@@ -527,12 +540,79 @@ const MobSeqBadge = styled.div<{ $status: 'active' | 'next' | 'std' }>`
 
 const MobOrderCard = styled.div<{ $active?: boolean }>`
   background: #ffffff;
-  border-radius: var(--radius-technical);
+  border-radius: 20px;
   border: 1px solid ${p => p.$active ? '#0F6E56' : '#E2E8F0'};
-  padding: 12px;
-  margin-bottom: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  ${p => p.$active && 'box-shadow: 0 4px 12px rgba(15,110,86,0.1); border-left: 4px solid #0F6E56;'}
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+  ${p => p.$active && 'box-shadow: 0 12px 32px rgba(15,110,86,0.12); border-left: 6px solid #0F6E56;'}
+`;
+
+const MobCardTitle = styled.div`
+  font-size: 20px;
+  font-weight: 800;
+  color: #111827;
+  line-height: 1.2;
+  margin-bottom: 4px;
+`;
+
+const MobCardAddress = styled.div`
+  font-size: 15px;
+  color: #4B5563;
+  line-height: 1.5;
+  margin: 10px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+`;
+
+const MobDetailRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+`;
+
+const MobActionGrid = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #F1F5F9;
+`;
+
+const BigActionBtn = styled.button<{ $variant?: 'call' | 'nav' | 'done' | 'cancel' }>`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 52px;
+  border-radius: 14px;
+  font-weight: 800;
+  font-size: 15px;
+  border: none;
+  transition: all 0.2s ease;
+  cursor: pointer;
+
+  &:active { transform: scale(0.96); }
+
+  ${p => p.$variant === 'call' && `
+    background: #DCFCE7; color: #166534; border: 1px solid #16653430;
+    &:active { background: #BBF7D0; }
+  `}
+  ${p => p.$variant === 'nav' && `
+    background: #DBEAFE; color: #1E40AF; border: 1px solid #1E40AF30;
+    &:active { background: #BFDBFE; }
+  `}
+  ${p => p.$variant === 'done' && `
+    background: #111827; color: #FFFFFF; grid-column: span 2; height: 58px; font-size: 17px;
+    box-shadow: 0 4px 12px rgba(17,24,39,0.2);
+  `}
+  ${p => p.$variant === 'cancel' && `
+    background: #FEE2E2; color: #991B1B; border: 1px solid #991B1B30;
+  `}
 `;
 
 const MobDivider = styled.div`
@@ -925,7 +1005,7 @@ export default function OrdersPage() {
       });
     }
 
-    const slotMatch = (s?: string, kw: string[]) => {
+    const slotMatch = (s: string | undefined, kw: string[]) => {
       const slot = (s || '').toLowerCase();
       return kw.some(k => slot.includes(k));
     };
@@ -948,6 +1028,9 @@ export default function OrdersPage() {
 
     // GREEDY ROUTE OPTIMIZATION (Nearest Neighbor)
     const optimizeRoute = (orderList: Order[], startPos: {lat: number, lng: number}) => {
+      // Optimization is heavy O(N^2). Skip if list is too large to prevent UI lag.
+      if (orderList.length > 40) return { result: orderList, lastPos: startPos };
+      
       let currentPos = { ...startPos };
       const unvisited = [...orderList];
       const result: Order[] = [];
@@ -1000,7 +1083,7 @@ export default function OrdersPage() {
       done: orders.filter(o => ['delivered', 'completed'].includes(o.status?.toLowerCase())),
       cancelled: orders.filter(o => o.status?.toLowerCase() === 'cancelled')
     };
-  }, [orders, searchTerm, users]);
+  }, [orders, searchTerm, users, activeTab]);
 
   const completedToday = useMemo(() => {
     const today = new Date();
@@ -1035,6 +1118,86 @@ export default function OrdersPage() {
     if(!phone||phone==='N/A'){alert('Phone not available');return;}
     window.open(`tel:${phone.replace(/\s/g,'')}`, '_self');
   };
+
+  /* ── Mobile Card Generator ── */
+  const renderMobCard = (o: Order, idx: number, seqOffset: number = 0, isFast: boolean = false) => {
+    const user = getUserDetails(o.userId);
+    const phone = user?.phoneNumber || o.userPhone || o.phone || '';
+    const currentStatus = o.status?.toLowerCase();
+    const isDone = currentStatus === 'completed' || currentStatus === 'delivered';
+
+    return (
+      <MobOrderCard key={o.id} $active={isFast && idx === 0}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+           <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+                {!isDone && <MobSeqBadge $status={isFast && idx === 0 ? 'active' : 'std'}>{seqOffset + idx + 1}</MobSeqBadge>}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <MobCardTitle 
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => router.push('/admin/users?customerId=' + o.userId)}
+                  >
+                    {getName(o, user)}
+                  </MobCardTitle>
+                  {user?.customerId && (
+                    <span style={{ fontSize: 10, fontWeight: 900, color: '#0F6E56', background: 'rgba(15,110,86,0.1)', padding: '2px 8px', borderRadius: 6, display: 'inline-block' }}>
+                      #{user.customerId}
+                    </span>
+                  )}
+                </div>
+              </div>
+           </div>
+           {o.deliverySlot && (
+              <Tag $clr={o.deliverySlot.toLowerCase().includes('morning') ? '#F59E0B' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#3B82F6' : '#8B5CF6'} style={{ fontSize: 11, fontWeight: 800 }}>
+                {o.deliverySlot}
+              </Tag>
+           )}
+        </div>
+
+        <MobCardAddress>
+          {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address Provided'}
+        </MobCardAddress>
+
+        <MobDetailRow>
+          <Tag $clr="#111827" style={{ fontSize: 11, fontWeight: 900, padding: '4px 10px' }}>
+             {o.quantity} Jars × 20L
+          </Tag>
+          {o.paymentMethod && (
+            <Tag $clr={PM_COLOR[o.paymentMethod] || '#666'} style={{ fontSize: 11, fontWeight: 900, padding: '4px 10px' }}>
+              <span style={{ opacity: 0.7, marginRight: 4 }}>{o.paymentMethod.toUpperCase()}</span>
+              {(['wallet', 'upi', 'razorpay'].includes(o.paymentMethod)) && '• PAID'}
+            </Tag>
+          )}
+          <Tag style={{ fontSize: 11, fontWeight: 800, padding: '4px 10px', background: '#F1F5F9', color: '#64748B' }}>
+            {o.plusCode || '#NO-PLUS-CODE'}
+          </Tag>
+        </MobDetailRow>
+
+        {!isDone && (
+          <MobActionGrid>
+            <BigActionBtn $variant="call" onClick={() => handleCall(phone)}>
+              <FiPhone size={20} /> Call
+            </BigActionBtn>
+            <BigActionBtn $variant="nav" onClick={() => handleNavigation(o)}>
+              <FiNavigation size={20} /> Map
+            </BigActionBtn>
+            <BigActionBtn $variant="done" onClick={() => handleDeliveryClick(o)}>
+              <FiCheckCircle size={22} /> MARK AS DELIVERED
+            </BigActionBtn>
+          </MobActionGrid>
+        )}
+
+        {isDone && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F1F5F9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+             <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>
+                Delivered {timeAgo(o.updatedAt || o.createdAt)}
+             </div>
+             <Tag $clr="#10B981" style={{ fontWeight: 900 }}>COMPLETED</Tag>
+          </div>
+        )}
+      </MobOrderCard>
+    );
+  };
   const handleNavigation=(o:Order)=>{
     const lat = o.deliveryAddress?.latitude || o.raw?.latitude || o.raw?.location?.latitude;
     const lng = o.deliveryAddress?.longitude || o.raw?.longitude || o.raw?.location?.longitude;
@@ -1054,7 +1217,84 @@ export default function OrdersPage() {
     if(!dest){alert('No address info found');return;}
     window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(dest)}`,'_blank');
   };
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const handleDeliveryClick=(o:Order)=>{ setSelectedOrder(o); setShowModal(true); };
+
+  const handleBulkCancelAll = async (targetOrders: Order[]) => {
+    if (targetOrders.length === 0) { alert('No orders to cancel'); return; }
+    if (!confirm(`⚠️ CRITICAL ACTION: Are you sure you want to CANCEL ALL ${targetOrders.length} open orders? This cannot be undone.`)) return;
+    
+    setIsBulkProcessing(true);
+    try {
+      for (const order of targetOrders) {
+        await updateDocument('orders', order.id, { 
+          status: 'cancelled', 
+          cancelledAt: new Date(),
+          updatedAt: new Date(),
+          cancellationReason: 'Bulk Cancelled by Admin'
+        });
+        await logActivity({
+          action: 'ORDER_CANCELLED_BULK', actor: 'ADMIN', actorName: 'Admin', actorId: userAuth?.uid || 'admin',
+          details: `Bulk cancelled order #${order.id}`, targetId: order.id
+        });
+      }
+      alert(`✅ Successfully cancelled ${targetOrders.length} orders.`);
+    } catch (e) {
+      console.error(e);
+      alert('❌ Failed during bulk cancel. Some orders might not have been updated.');
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const handleBulkDeliverAll = async (targetOrders: Order[]) => {
+    if (targetOrders.length === 0) { alert('No orders to deliver'); return; }
+    if (!confirm(`⚠️ BULK DELIVERY: Mark ALL ${targetOrders.length} open orders as DELIVERED? \n\nThis will assume full quantity delivered and update wallet/jar balances accordingly.`)) return;
+    
+    setIsBulkProcessing(true);
+    try {
+      const adminId = userAuth?.uid || 'admin_panel';
+      for (const order of targetOrders) {
+        const user = getUserDetails(order.userId);
+        const qty = order.quantity || 1;
+        const amt = order.amount || (qty * 37);
+        const netJars = qty; 
+        
+        await updateDocument('orders', order.id, {
+          status: 'completed', 
+          deliveredAt: new Date(),
+          updatedAt: new Date(),
+          handover: {
+            deliveredJars: qty, 
+            collectedJars: 0, 
+            netChange: netJars, 
+            completedAt: new Date(),
+            notes: 'Bulk Delivered', 
+            amountPaid: order.paymentMethod === 'cash' ? 0 : amt
+          }
+        });
+        
+        if (user) {
+          const unpaid = (order.paymentMethod === 'cash') ? amt : 0;
+          await updateDocument('users', user.id, {
+            wallet_balance: (user.wallet_balance || 0) - unpaid,
+            jars_occupied: (user.jars_occupied || 0) + netJars
+          });
+        }
+
+        await logActivity({
+          action: 'ORDER_DELIVERED_BULK', actor: 'ADMIN', actorName: 'Admin', actorId: adminId,
+          details: `Bulk delivered order #${order.id}`, targetId: order.id
+        });
+      }
+      alert(`✅ Successfully delivered ${targetOrders.length} orders.`);
+    } catch (e) {
+      console.error(e);
+      alert('❌ Failed during bulk delivery. Some orders might not have been updated.');
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
   const handleReceivePayment=(o:Order)=>{ setSelectedQRCodeOrder(o); setShowQRModal(true); };
   const handlePartnerChange=async(orderId:string,name:string)=>{
     const p=armyMembers.find(m=>m.name===name);
@@ -1604,10 +1844,20 @@ export default function OrdersPage() {
               <option value="">Assign all to… ({armyMembers.filter(m=>m.isOnline).length} online)</option>
               {armyMembers.filter(m=>m.isOnline).map(m=><option key={m.id} value={m.name}>● {m.name}</option>)}
             </select>
-            {bulkPartner&&(
+            
+            {bulkPartner ? (
               <FPill $active onClick={()=>handleBulkAssign([...morning,...afternoon,...evening,...others])} style={{opacity:isBulkAssigning?.6:1}}>
                 {isBulkAssigning?'Assigning…':'Assign All'}
               </FPill>
+            ) : (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <FPill $active={false} onClick={() => handleBulkDeliverAll([...morning, ...afternoon, ...evening, ...others])} style={{ border: '1px solid #10B981', color: '#10B981', opacity: isBulkProcessing ? 0.5 : 1 }}>
+                  Deliver All
+                </FPill>
+                <FPill $active={false} onClick={() => handleBulkCancelAll([...morning, ...afternoon, ...evening, ...others])} style={{ border: '1px solid #EF4444', color: '#EF4444', opacity: isBulkProcessing ? 0.5 : 1 }}>
+                  Cancel All
+                </FPill>
+              </div>
             )}
           </div>
         </FilterStrip>
@@ -1682,6 +1932,18 @@ export default function OrdersPage() {
         <MobContent>
           {mobileTab === 'queue' && (
             <>
+              {/* BULK ACTIONS (MOBILE) */}
+              {mobileQueue.all.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                  <ABtn $v="primary" style={{ flex: 1, minHeight: 38, fontSize: 11 }} onClick={() => handleBulkDeliverAll(mobileQueue.all)}>
+                    Deliver All ({mobileQueue.all.length})
+                  </ABtn>
+                  <ABtn $v="danger" style={{ flex: 1, minHeight: 38, fontSize: 11 }} onClick={() => handleBulkCancelAll(mobileQueue.all)}>
+                    Cancel All
+                  </ABtn>
+                </div>
+              )}
+
               <MobSummaryStrip>
                 <MobSumCard $clr="#993C1D">
                   <div className="val">{mobileQueue.fast.length}</div>
@@ -1701,28 +1963,7 @@ export default function OrdersPage() {
               {mobileQueue.fast.length > 0 && (
                 <>
                   <div style={{fontSize: 11, fontWeight: 800, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 10}}>⚡ Fast Priority — Deliver ASAP</div>
-                  {mobileQueue.fast.map((o, idx) => (
-                    <MobOrderCard key={o.id} $active={idx === 0}>
-                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
-                        <MobSeqBadge $status={idx === 0 ? 'active' : 'next'}>{idx + 1}</MobSeqBadge>
-                        <div style={{flex: 1}}>
-                          <div style={{fontSize: 15, fontWeight: 800, color: 'var(--foreground)'}}>{getName(o, getUserDetails(o.userId))}</div>
-                          <div style={{fontSize: 12, color: 'var(--color-text-tertiary)', marginTop: 2}}>
-                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
-                          </div>
-                        </div>
-                        <Tag $clr="#EF4444" style={{fontSize: 10}}>FAST</Tag>
-                      </div>
-                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
-                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
-                        <div style={{fontSize: 11, fontWeight: 800, background: 'var(--color-background-tertiary)', padding: '2px 8px', borderRadius: 6}}>
-                          {o.quantity} × 20L
-                        </div>
-                        <ABtn $v="primary" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Done</ABtn>
-                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
-                      </div>
-                    </MobOrderCard>
-                  ))}
+                  {mobileQueue.fast.map((o, idx) => renderMobCard(o, idx, 0, true))}
                 </>
               )}
 
@@ -1730,127 +1971,28 @@ export default function OrdersPage() {
               {mobileQueue.morning.length > 0 && (
                 <>
                   <MobDivider><span>Morning · 11:00 AM – 1:30 PM</span></MobDivider>
-                  {mobileQueue.morning.map((o, idx) => (
-                    <MobOrderCard key={o.id}>
-                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
-                        <MobSeqBadge $status="std">{mobileQueue.fast.length + idx + 1}</MobSeqBadge>
-                        <div style={{flex: 1}}>
-                          <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
-                          <div style={{fontSize: 12, color: '#555'}}>
-                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
-                          </div>
-                          {o.paymentMethod && (
-                            <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
-                              <Tag $clr={PM_COLOR[o.paymentMethod]} style={{ fontSize: 9 }}>
-                                {o.paymentMethod}
-                                {(o.paymentMethod === 'wallet' || o.paymentMethod === 'upi' || o.paymentMethod === 'razorpay') && ' · PAID'}
-                              </Tag>
-                              {o.deliveryDate && <Tag style={{ fontSize: 9 }}>{fmt(o.deliveryDate)}</Tag>}
-                            </div>
-                          )}
-                        </div>
-                        <Tag $clr="#F59E0B" style={{fontSize: 10}}>Morning</Tag>
-                      </div>
-                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
-                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
-                        <ABtn $v="default" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Handover</ABtn>
-                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
-                      </div>
-                    </MobOrderCard>
-                  ))}
+                  {mobileQueue.morning.map((o, idx) => renderMobCard(o, idx, mobileQueue.fast.length))}
                 </>
               )}
 
               {mobileQueue.afternoon.length > 0 && (
                 <>
                   <MobDivider><span>Afternoon · 2:30 PM – 4:30 PM</span></MobDivider>
-                  {mobileQueue.afternoon.map((o, idx) => (
-                    <MobOrderCard key={o.id}>
-                       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
-                        <MobSeqBadge $status="std">{mobileQueue.fast.length + mobileQueue.morning.length + idx + 1}</MobSeqBadge>
-                        <div style={{flex: 1}}>
-                          <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
-                          <div style={{fontSize: 12, color: '#555'}}>
-                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
-                          </div>
-                          {o.paymentMethod && (
-                            <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
-                              <Tag $clr={PM_COLOR[o.paymentMethod]} style={{ fontSize: 9 }}>
-                                {o.paymentMethod}
-                                {(o.paymentMethod === 'wallet' || o.paymentMethod === 'upi' || o.paymentMethod === 'razorpay') && ' · PAID'}
-                              </Tag>
-                              {o.deliveryDate && <Tag style={{ fontSize: 9 }}>{fmt(o.deliveryDate)}</Tag>}
-                            </div>
-                          )}
-                        </div>
-                        <Tag $clr="#3B82F6" style={{fontSize: 10}}>Afternoon</Tag>
-                      </div>
-                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
-                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
-                        <ABtn $v="default" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Handover</ABtn>
-                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
-                      </div>
-                    </MobOrderCard>
-                  ))}
+                  {mobileQueue.afternoon.map((o, idx) => renderMobCard(o, idx, mobileQueue.fast.length + mobileQueue.morning.length))}
                 </>
               )}
 
               {mobileQueue.evening.length > 0 && (
                 <>
                   <MobDivider><span>Evening · 6:00 PM – 10:30 PM</span></MobDivider>
-                  {mobileQueue.evening.map((o, idx) => (
-                    <MobOrderCard key={o.id}>
-                       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
-                        <MobSeqBadge $status="std">{mobileQueue.fast.length + mobileQueue.morning.length + mobileQueue.afternoon.length + idx + 1}</MobSeqBadge>
-                        <div style={{flex: 1}}>
-                          <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
-                          <div style={{fontSize: 12, color: '#555'}}>
-                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
-                          </div>
-                          {o.paymentMethod && (
-                            <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
-                              <Tag $clr={PM_COLOR[o.paymentMethod]} style={{ fontSize: 9 }}>
-                                {o.paymentMethod}
-                                {(o.paymentMethod === 'wallet' || o.paymentMethod === 'upi' || o.paymentMethod === 'razorpay') && ' · PAID'}
-                              </Tag>
-                              {o.deliveryDate && <Tag style={{ fontSize: 9 }}>{fmt(o.deliveryDate)}</Tag>}
-                            </div>
-                          )}
-                        </div>
-                        <Tag $clr="#8B5CF6" style={{fontSize: 10}}>Evening</Tag>
-                      </div>
-                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
-                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
-                        <ABtn $v="default" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Handover</ABtn>
-                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
-                      </div>
-                    </MobOrderCard>
-                  ))}
+                  {mobileQueue.evening.map((o, idx) => renderMobCard(o, idx, mobileQueue.fast.length + mobileQueue.morning.length + mobileQueue.afternoon.length))}
                 </>
               )}
 
               {mobileQueue.others.length > 0 && (
                 <>
                   <MobDivider><span>Other Slots</span></MobDivider>
-                  {mobileQueue.others.map((o, idx) => (
-                    <MobOrderCard key={o.id}>
-                       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
-                        <MobSeqBadge $status="std">{mobileQueue.all.length - mobileQueue.others.length + idx + 1}</MobSeqBadge>
-                        <div style={{flex: 1}}>
-                          <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
-                          <div style={{fontSize: 12, color: '#555'}}>
-                            {o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address'}
-                          </div>
-                        </div>
-                        <Tag $clr="var(--color-text-tertiary)" style={{fontSize: 10}}>{o.deliverySlot || 'Standard'}</Tag>
-                      </div>
-                      <div style={{display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: '1px solid var(--color-border-primary)'}}>
-                        <div style={{fontSize: 11, color: '#555', fontFamily: 'Fira Code', flex: 1}}>{o.plusCode || '#NO-CODE'}</div>
-                        <ABtn $v="default" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleDeliveryClick(o)}>Handover</ABtn>
-                        <ABtn $v="info" style={{minHeight: 32, padding: '0 12px'}} onClick={() => handleNavigation(o)}><FiNavigation size={12}/></ABtn>
-                      </div>
-                    </MobOrderCard>
-                  ))}
+                  {mobileQueue.others.map((o, idx) => renderMobCard(o, idx, mobileQueue.all.length - mobileQueue.others.length))}
                 </>
               )}
 
@@ -1883,65 +2025,95 @@ export default function OrdersPage() {
                 <div style={{padding: '0 16px'}}>
                   {mobileQueue.all.map((o, idx) => {
                     const isFast = mobileQueue.fast.some(f => f.id === o.id);
+                    const user = getUserDetails(o.userId);
                     return (
-                      <div key={o.id} style={{display: 'flex', gap: 12, marginBottom: 16, position: 'relative'}}>
+                      <div key={o.id} style={{display: 'flex', gap: 12, marginBottom: 20, position: 'relative'}}>
                         {idx !== mobileQueue.all.length - 1 && (
-                          <div style={{position: 'absolute', left: 15, top: 30, bottom: -16, width: 2, background: 'rgba(15,110,86,0.1)', borderStyle: 'dashed'}} />
+                          <div style={{position: 'absolute', left: 17, top: 34, bottom: -20, width: 2, background: 'rgba(15,110,86,0.1)', borderStyle: 'dashed'}} />
                         )}
                         <div style={{
-                          width: 32, height: 32, borderRadius: '50%', background: isFast ? '#EF4444' : '#0F6E56', 
+                          width: 36, height: 36, borderRadius: '50%', background: isFast ? '#EF4444' : '#0F6E56', 
                           color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                          fontSize: 12, fontWeight: 800, flexShrink: 0, zIndex: 1
+                          fontSize: 14, fontWeight: 900, flexShrink: 0, zIndex: 1,
+                          boxShadow: '0 4px 10px rgba(0,0,0,0.1)'
                         }}>
                           {idx + 1}
                         </div>
-                        <div style={{flex: 1, background: '#fff', border: '1px solid var(--color-border-primary)', borderRadius: 12, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                          <div>
-                            <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
-                            <div style={{display: 'flex', alignItems: 'center', gap: 4, marginTop: 4}}>
-                              <FiMapPin size={10} color={o.plusCode ? '#0F6E56' : '#999'} />
-                              <div style={{fontSize: 10, color: o.plusCode ? '#0F6E56' : '#999', fontFamily: 'Fira Code', fontWeight: 600}}>
-                                {o.plusCode || 'NO PLUS CODE'}
+                        <div style={{flex: 1, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.03)'}}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div 
+                                style={{fontSize: 16, fontWeight: 800, color: '#111827', cursor: 'pointer', display: 'flex', alignItems: 'center'}}
+                                onClick={() => router.push('/admin/users?customerId=' + o.userId)}
+                              >
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getName(o, user)}</span>
+                                {user?.customerId && (
+                                  <span style={{ fontSize: 9, fontWeight: 900, color: '#0F6E56', background: 'rgba(15,110,86,0.1)', padding: '2px 6px', borderRadius: 6, marginLeft: 8, flexShrink: 0 }}>
+                                    #{user.customerId}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{fontSize: 12, color: '#64748B', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4}}>
+                                <FiMapPin size={12} /> {o.plusCode || '#NO-PLUS-CODE'}
                               </div>
                             </div>
+                            <div style={{ fontSize: 13, fontWeight: 900, background: '#F1F5F9', padding: '4px 8px', borderRadius: 8 }}>{o.quantity}</div>
                           </div>
-                          <ABtn $v="info" style={{minHeight: 32, width: 32, padding: 0, borderRadius: 8}} onClick={() => handleNavigation(o)}>
-                            <FiNavigation size={14}/>
-                          </ABtn>
+                          
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            <BigActionBtn $variant="call" style={{ height: 40, fontSize: 13, borderRadius: 10 }} onClick={() => handleCall(user?.phoneNumber || o.userPhone || o.phone)}>
+                              <FiPhone size={16}/> Call
+                            </BigActionBtn>
+                            <BigActionBtn $variant="nav" style={{ height: 40, fontSize: 13, borderRadius: 10 }} onClick={() => handleNavigation(o)}>
+                              <FiNavigation size={16}/> Map
+                            </BigActionBtn>
+                          </div>
                         </div>
                       </div>
                     );
                   })}
                   
-                  <ABtn $v="primary" style={{marginTop: 10, width: '100%', minHeight: 48}} onClick={() => {
+                  <BigActionBtn $variant="done" style={{marginTop: 14, width: '100%', height: 64, fontSize: 18, borderRadius: 16}} onClick={() => {
                     if (mobileQueue.all[0]) handleNavigation(mobileQueue.all[0]);
-                  }}>Start Optimized Navigation</ABtn>
+                  }}>
+                    <FiNavigation size={24} /> START NAVIGATION
+                  </BigActionBtn>
                 </div>
               )}
 
               {/* Floating Next Customer Card */}
               {mobileQueue.all.length > 0 && (
-                <div style={{ position: 'fixed', bottom: 20, left: 16, right: 16, background: '#fff', borderRadius: 20, padding: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.2)', border: '1px solid #0F6E5630', zIndex: 1000 }}>
-                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                      <div style={{ background: '#0F6E5615', color: '#0F6E56', fontSize: 9, fontWeight: 900, padding: '4px 10px', borderRadius: 8 }}>NEXT CUSTOMER</div>
-                      <div style={{ fontSize: 11, color: '#666', fontWeight: 600 }}>{mobileQueue.all.length} stops left</div>
+                <div style={{ position: 'fixed', bottom: 20, left: 16, right: 16, background: '#fff', borderRadius: 24, padding: '20px 22px', boxShadow: '0 20px 60px rgba(0,0,0,0.25)', border: '1px solid #0F6E5640', zIndex: 1000 }}>
+                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                      <div style={{ background: '#0F6E56', color: '#fff', fontSize: 10, fontWeight: 900, padding: '4px 12px', borderRadius: 20, letterSpacing: '0.05em' }}>UP NEXT</div>
+                      <div style={{ fontSize: 12, color: '#64748B', fontWeight: 800 }}>{mobileQueue.all.length} stops left</div>
                    </div>
-                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                      <div style={{ width: 44, height: 44, borderRadius: 14, background: '#0F6E56', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800 }}>
+                   <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                      <div style={{ width: 52, height: 52, borderRadius: 18, background: '#111827', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 900, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
                         {mobileQueue.all[0].quantity}
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: '#1a1a1a' }}>{getName(mobileQueue.all[0], getUserDetails(mobileQueue.all[0].userId))}</div>
-                        <div style={{ fontSize: 12, color: '#666', display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <FiMapPin size={10} color="#0F6E56" /> {mobileQueue.all[0].plusCode || 'Tap to locate'}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div 
+                          style={{ fontSize: 18, fontWeight: 800, color: '#111827', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                          onClick={() => router.push('/admin/users?customerId=' + mobileQueue.all[0].userId)}
+                        >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getName(mobileQueue.all[0], getUserDetails(mobileQueue.all[0].userId))}</span>
+                          {getUserDetails(mobileQueue.all[0].userId)?.customerId && (
+                            <span style={{ fontSize: 10, fontWeight: 900, color: '#0F6E56', background: 'rgba(15,110,86,0.1)', padding: '2px 8px', borderRadius: 8, marginLeft: 8, flexShrink: 0 }}>
+                              #{getUserDetails(mobileQueue.all[0].userId)?.customerId}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 13, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                          <FiMapPin size={12} color="#0F6E56" /> <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{mobileQueue.all[0].plusCode || 'No Plus Code'}</span>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                         <button onClick={() => handleCall(mobileQueue.all[0].userPhone || mobileQueue.all[0].phone)} style={{ width: 40, height: 40, borderRadius: 12, border: '1px solid #E2E8F0', background: '#fff', color: '#0F6E56', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <FiPhone size={18} />
+                      <div style={{ display: 'flex', gap: 10 }}>
+                         <button onClick={() => handleCall(mobileQueue.all[0].userPhone || mobileQueue.all[0].phone)} style={{ width: 48, height: 48, borderRadius: 14, border: '1px solid #E2E8F0', background: '#DCFCE7', color: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+                            <FiPhone size={22} />
                          </button>
-                         <button onClick={() => handleNavigation(mobileQueue.all[0])} style={{ width: 40, height: 40, borderRadius: 12, border: 'none', background: '#0F6E56', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <FiNavigation size={18} />
+                         <button onClick={() => handleNavigation(mobileQueue.all[0])} style={{ width: 48, height: 48, borderRadius: 14, border: 'none', background: '#111827', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                            <FiNavigation size={22} />
                          </button>
                       </div>
                    </div>
@@ -1964,17 +2136,7 @@ export default function OrdersPage() {
               </MobSummaryStrip>
 
               <div style={{fontSize: 11, fontWeight: 800, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 12}}>Delivered Today</div>
-              {completedToday.map(o => (
-                <MobOrderCard key={o.id} style={{opacity: 0.8}}>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                     <div style={{flex: 1}}>
-                        <div style={{fontSize: 14, fontWeight: 700}}>{getName(o, getUserDetails(o.userId))}</div>
-                        <div style={{fontSize: 11, color: '#555'}}>{timeAgo(o.updatedAt || o.createdAt)} · {o.quantity} jars</div>
-                      </div>
-                      <Tag $clr="#10B981">Done</Tag>
-                  </div>
-                </MobOrderCard>
-              ))}
+              {completedToday.map((o, idx) => renderMobCard(o, idx))}
               {completedToday.length === 0 && (
                  <div style={{padding: '40px 20px', textAlign: 'center', color: '#555', fontSize: 13}}>No orders completed yet today.</div>
               )}

@@ -20,6 +20,7 @@ interface Order {
     longitude?: number;
     fullAddress?: string;
   };
+  address?: any;
   raw?: any;
 }
 
@@ -178,7 +179,7 @@ export const DeliveryMap = ({ orders, warehouse }: DeliveryMapProps) => {
         bounds.extend({ lat: Number(lat), lng: Number(lng) });
       }
     });
-    map.fitBounds(bounds, { padding: 50 });
+    map.fitBounds(bounds, 50);
     setMap(map);
     setZoom(map.getZoom() || 13);
   }, [filteredOrders, warehouse]);

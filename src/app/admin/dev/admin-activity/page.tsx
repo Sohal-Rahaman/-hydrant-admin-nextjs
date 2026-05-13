@@ -20,7 +20,7 @@ export default function AdminActivityLogs() {
       const allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       const adminLogs = allLogs.filter((log: any) => log.actor === 'ADMIN');
       
-      const formatted = adminLogs.map(log => ({
+      const formatted = adminLogs.map((log: any) => ({
         id: log.id,
         adminId: log.actorId || 'Unknown Admin',
         name: log.actorName || 'Admin',

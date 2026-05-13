@@ -18,12 +18,12 @@ export default function RefundLogs() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const liveLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const liveLogs = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
       const refundLogs = liveLogs.filter((log: any) => 
         log.event?.includes('refund') || log.status === 'refunded' || log.type === 'penalty'
       );
       
-      const formatted = refundLogs.map(log => {
+      const formatted = refundLogs.map((log: any) => {
         const payload = log.payload?.refund?.entity || log.payload?.payment?.entity || {};
         return {
           id: payload.id || log.id,

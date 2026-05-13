@@ -19,7 +19,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 interface ProMembership {
   id: string;
   userId: string;
-  proStatus: 'active' | 'trial' | 'expired';
+  proStatus: 'active' | 'trial' | 'expired' | 'paused';
   proPlanId: string | null;
   proId?: string;
   proJarsUsedThisMonth: number;
@@ -152,7 +152,6 @@ export default function ProControlCenter() {
         updatedAt: serverTimestamp()
       });
       alert('Usage reset successfully');
-      fetchData();
     } catch (e) { alert('Failed to reset'); }
   };
 
@@ -173,7 +172,6 @@ export default function ProControlCenter() {
         createdAt: serverTimestamp()
       });
       alert('Penalty applied and logged.');
-      fetchData();
     } catch (e) { alert('Failed to apply penalty'); }
   };
 
@@ -245,7 +243,7 @@ export default function ProControlCenter() {
                 <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                   <FiArrowUpRight className="text-emerald-400" /> Plan Enrollment Simulator
                 </h2>
-                <ProPlans isAdminMode={true} onEnrolled={() => fetchData()} />
+                <ProPlans isAdminMode={true} onEnrolled={() => {}} />
               </div>
             </motion.div>
           )}

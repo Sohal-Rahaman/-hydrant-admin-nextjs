@@ -7,7 +7,7 @@ import {
   FiClock, FiUser, FiActivity, FiArrowRight, 
   FiShield, FiInfo, FiTrendingUp, FiAlertCircle 
 } from 'react-icons/fi';
-import { updateDocument, Jar, subscribeToCollection, adminManualEnrollPro } from '@/lib/firebase';
+import { updateDocument, addDocument, Jar, subscribeToCollection, adminManualEnrollPro } from '@/lib/firebase';
 import { where } from 'firebase/firestore';
 
 interface MemberDetailsDrawerProps {

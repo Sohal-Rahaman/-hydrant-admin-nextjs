@@ -858,7 +858,8 @@ const toDate = (dateValue: any): Date => {
       normalCount
     });
 
-    setStats({
+    setStats(prev => ({
+      ...prev,
       revenue: todayRevenue,
       openOrders: processingOrders,
       newCustomers: newCustomersToday,
@@ -868,7 +869,7 @@ const toDate = (dateValue: any): Date => {
       expressCount,
       subscriptionCount,
       normalCount
-    });
+    }));
   };
 
   const handleTriggerSubscriptions = async () => {
