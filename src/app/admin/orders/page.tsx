@@ -29,6 +29,7 @@ import { subscribeToCollection, updateDocument, db, assignJarToCustomer, returnJ
 import UserInsightDrawer from '@/components/UserInsightDrawer';
 import { normalizeOrderStatus } from '@/lib/orderStatus';
 import { collection, getDocs } from 'firebase/firestore';
+import { Player } from '@lottiefiles/react-lottie-player';
 import { logActivity } from '@/lib/activityLogger';
 import { useAuth } from '@/context/AuthContext';
 import { DeliveryHandoverModal } from '@/components/DeliveryHandoverModal';
@@ -553,40 +554,61 @@ const MobSeqBadge = styled.div<{ $status: 'active' | 'next' | 'std' }>`
 
 const MobOrderCard = styled(motion.div)<{ $fast?: boolean }>`
   background: #fff;
-  border-radius: 28px;
-  padding: 24px;
-  margin-bottom: 20px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.02);
+  border-radius: 32px;
+  padding: 28px;
+  margin-bottom: 24px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.01);
   border: 1px solid #F1F5F9;
   position: relative;
   overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   ${props => props.$fast && `
-    border: 2px solid #EF444440;
+    border: 2px solid #EF444430;
     background: linear-gradient(to bottom right, #fff, #FFF5F5);
   `}
-  &:active {
-    transform: scale(0.98);
+`;
+
+const SkeletonPulse = keyframes`
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+`;
+
+const MobSkeletonCard = styled.div`
+  background: #fff;
+  border-radius: 32px;
+  padding: 28px;
+  margin-bottom: 24px;
+  min-height: 400px;
+  border: 1px solid #F1F5F9;
+  .shimmer {
+    background: linear-gradient(90deg, #F1F5F9 25%, #F8FAFC 50%, #F1F5F9 75%);
+    background-size: 200% 100%;
+    animation: ${SkeletonPulse} 1.5s infinite linear;
+    border-radius: 8px;
   }
 `;
 
 const MobCardTitle = styled.div`
-  font-size: 22px;
-  font-weight: 800;
+  font-size: 26px;
+  font-weight: 900;
   color: #111827;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
 `;
 
 const MobCardAddress = styled.div`
-  font-size: 14px;
+  font-size: 16px;
   color: #4B5563;
-  margin-top: 10px;
-  line-height: 1.5;
-  font-weight: 500;
+  margin-top: 12px;
+  line-height: 1.6;
+  font-weight: 600;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
 `;
 
 const MobActionGrid = styled.div`
@@ -1164,7 +1186,29 @@ export default function OrdersPage() {
   };
 
   /* ── Mobile Card Generator ── */
+  const renderMobSkeleton = () => (
+    <MobSkeletonCard>
+      <div className="shimmer" style={{ width: '60px', height: '20px', marginBottom: 16 }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div className="shimmer" style={{ width: '150px', height: '32px' }} />
+        <div className="shimmer" style={{ width: '80px', height: '32px' }} />
+      </div>
+      <div className="shimmer" style={{ width: '100%', height: '60px', marginBottom: 20 }} />
+      <div style={{ display: 'flex', gap: 10, marginBottom: 40 }}>
+        <div className="shimmer" style={{ width: '100px', height: '30px' }} />
+        <div className="shimmer" style={{ width: '100px', height: '30px' }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="shimmer" style={{ height: '58px', borderRadius: 18 }} />
+        <div className="shimmer" style={{ height: '58px', borderRadius: 18 }} />
+        <div className="shimmer" style={{ height: '58px', gridColumn: 'span 2', borderRadius: 18 }} />
+      </div>
+    </MobSkeletonCard>
+  );
+
   const renderMobCard = (o: Order, idx: number, seqOffset: number = 0, isFast: boolean = false) => {
+    if (loading) return renderMobSkeleton();
+    
     const user = getUserDetails(o.userId);
     const phone = user?.phoneNumber || o.userPhone || o.phone || '';
     const currentStatus = o.status?.toLowerCase();
@@ -1174,100 +1218,124 @@ export default function OrdersPage() {
       <MobOrderCard 
         key={o.id} 
         $fast={isFast}
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: idx * 0.05 }}
+        initial={{ opacity: 0, scale: 0.9, y: 30 }}
+        whileInView={{ opacity: 1, scale: 1, y: 0 }}
+        viewport={{ once: true, margin: "-50px" }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-           <div style={{ background: isFast ? '#EF4444' : '#0F6E56', color: '#fff', fontSize: 10, fontWeight: 900, padding: '4px 10px', borderRadius: 8, letterSpacing: '0.05em' }}>
-             {isFast ? 'FAST TRACK' : `STOP #${seqOffset + idx + 1}`}
-           </div>
-           <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 10, color: '#64748B', fontWeight: 800 }}>{o.id}</div>
-              <div style={{ fontSize: 18, fontWeight: 900, color: '#10B981' }}>₹{o.amount || (o.quantity * 37)}</div>
-           </div>
-        </div>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+             <div style={{ background: isFast ? '#EF4444' : '#0F6E56', color: '#fff', fontSize: 11, fontWeight: 900, padding: '6px 14px', borderRadius: 10, letterSpacing: '0.05em' }}>
+               {isFast ? 'FAST TRACK' : `STOP #${seqOffset + idx + 1}`}
+             </div>
+             <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 11, color: '#94A3B8', fontWeight: 800, fontFamily: 'monospace' }}>{o.id}</div>
+                <div style={{ fontSize: 24, fontWeight: 950, color: '#10B981', marginTop: 4 }}>₹{o.amount || (o.quantity * 37)}</div>
+             </div>
+          </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div 
-              style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
-              onClick={() => router.push('/admin/users?customerId=' + o.userId)}
-            >
-              <MobCardTitle style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {getName(o, user)}
-              </MobCardTitle>
-              <ChevronRight size={20} color="#64748B" />
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div 
+                style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                onClick={() => router.push('/admin/users?customerId=' + o.userId)}
+              >
+                <MobCardTitle>
+                  {getName(o, user)}
+                </MobCardTitle>
+                <ChevronRight size={24} color="#CBD5E1" />
+              </div>
             </div>
-            {user?.customerId && (
-              <TacticalBadge $bg="rgba(15,110,86,0.1)" $color="#0F6E56" style={{ borderRadius: 8 }}>
-                #{user.customerId}
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+              {user?.customerId && (
+                <TacticalBadge $bg="rgba(15,110,86,0.08)" $color="#0F6E56" style={{ borderRadius: 8, fontSize: 12 }}>
+                  ID: {user.customerId}
+                </TacticalBadge>
+              )}
+              {o.plusCode && (
+                <TacticalBadge $bg="#F1F5F9" $color="#3B82F6" style={{ borderRadius: 8, fontSize: 12 }}>
+                  <MapPin size={12} /> {o.plusCode}
+                </TacticalBadge>
+              )}
+            </div>
+          </div>
+
+          <MobCardAddress>
+            <div style={{ width: 44, height: 44, background: '#DBEAFE', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+               <MapPin size={22} color="#2563EB" />
+            </div>
+            <span style={{ fontSize: 17, fontWeight: 700 }}>{o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address Provided'}</span>
+          </MobCardAddress>
+
+          <MobDetailRow style={{ marginTop: 24 }}>
+            <TacticalBadge $bg="#111827" $color="#fff" style={{ padding: '8px 16px', borderRadius: 14 }}>
+              <Package size={14} />
+              {o.quantity} Jars
+            </TacticalBadge>
+            
+            {o.deliverySlot && (
+               <TacticalBadge 
+                 $bg={o.deliverySlot.toLowerCase().includes('morning') ? '#FEF3C7' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#DBEAFE' : '#F3E8FF'} 
+                 $color={o.deliverySlot.toLowerCase().includes('morning') ? '#92400E' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#1E40AF' : '#6B21A8'}
+                 style={{ padding: '8px 16px', borderRadius: 14 }}
+               >
+                 <Clock size={16} />
+                 {o.deliverySlot}
+               </TacticalBadge>
+            )}
+
+            {o.paymentMethod && (
+              <TacticalBadge 
+                $bg={(['wallet', 'upi', 'razorpay'].includes(o.paymentMethod.toLowerCase())) ? '#F5F3FF' : (o.paymentMethod.toLowerCase() === 'cash' ? '#ECFDF5' : '#FFFBEB')} 
+                $color={(['wallet', 'upi', 'razorpay'].includes(o.paymentMethod.toLowerCase())) ? '#7C3AED' : (o.paymentMethod.toLowerCase() === 'cash' ? '#059669' : '#D97706')}
+                style={{ padding: '8px 16px', borderRadius: 14, fontWeight: 900 }}
+              >
+                <Wallet size={16} />
+                {o.paymentMethod.toUpperCase()} {(['wallet', 'upi', 'razorpay'].includes(o.paymentMethod.toLowerCase())) && '• PAID'}
               </TacticalBadge>
             )}
-          </div>
+          </MobDetailRow>
         </div>
-
-        <MobCardAddress>
-          <MapPin size={18} color="#3B82F6" style={{ flexShrink: 0 }} />
-          <span>{o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address Provided'}</span>
-        </MobCardAddress>
-
-        <MobDetailRow>
-          <TacticalBadge $bg="#111827" $color="#fff">
-            <Package size={14} />
-            {o.quantity} Jars × 20L
-          </TacticalBadge>
-          
-          {o.deliverySlot && (
-             <TacticalBadge 
-               $bg={o.deliverySlot.toLowerCase().includes('morning') ? '#FEF3C7' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#DBEAFE' : '#F3E8FF'} 
-               $color={o.deliverySlot.toLowerCase().includes('morning') ? '#92400E' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#1E40AF' : '#6B21A8'}
-             >
-               <Clock size={14} />
-               {o.deliverySlot}
-             </TacticalBadge>
-          )}
-
-          <TacticalBadge $bg="#F1F5F9" $color="#64748B">
-            <MapPin size={14} />
-            {o.plusCode || 'NO PLUS CODE'}
-          </TacticalBadge>
-
-          {o.paymentMethod && (
-            <TacticalBadge 
-              $bg={PM_COLOR[o.paymentMethod] || '#F1F5F9'} 
-              $color="#fff"
-              style={{ background: (['wallet', 'upi', 'razorpay'].includes(o.paymentMethod.toLowerCase())) ? '#8B5CF6' : (o.paymentMethod.toLowerCase() === 'cash' ? '#10B981' : '#F59E0B') }}
-            >
-              <Wallet size={14} />
-              {o.paymentMethod.toUpperCase()} {(['wallet', 'upi', 'razorpay'].includes(o.paymentMethod.toLowerCase())) && '• PAID'}
-            </TacticalBadge>
-          )}
-        </MobDetailRow>
 
         {!isDone && (
           <MobActionGrid>
             <BigActionBtn $variant="call" onClick={() => handleCall(phone)}>
-              <Phone size={22} /> Call
+              <Player 
+                autoplay 
+                loop 
+                src="https://lottie.host/0e6c6c4e-5e2e-4b41-9a70-8b06d48c95e1/call.json" 
+                style={{ width: 22, height: 22 }} 
+              /> CALL
             </BigActionBtn>
             <BigActionBtn $variant="nav" onClick={() => handleNavigation(o)}>
-              <Navigation size={22} /> Map
+              <Player 
+                autoplay 
+                loop 
+                src="https://lottie.host/9e8b7c6a-4d2b-4e1f-8c3a-9b8a7c6d5e4f/map.json" 
+                style={{ width: 22, height: 22 }} 
+              /> MAP
             </BigActionBtn>
             <BigActionBtn $variant="done" onClick={() => handleDeliveryClick(o)}>
-              <CheckCircle size={24} /> MARK AS DELIVERED
+              <Player 
+                autoplay 
+                src="https://lottie.host/8b8a1b6c-5e4f-3d2b-9c3f-4e5a7e0b5d5d/success.json" 
+                style={{ width: 28, height: 28 }} 
+              /> DELIVERED
             </BigActionBtn>
             <BigActionBtn $variant="cancel" onClick={() => handleCancelOrder(o.id)}>
-              <X size={18} /> Cancel Order
+              <X size={18} /> Cancel
             </BigActionBtn>
           </MobActionGrid>
         )}
 
         {isDone && (
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F1F5F9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-             <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>
-                Delivered {timeAgo(o.updatedAt || o.createdAt)}
+          <div style={{ marginTop: 24, paddingTop: 24, borderTop: '2px dashed #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+             <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748B', fontSize: 14, fontWeight: 800 }}>
+                <Clock size={18} /> {timeAgo(o.updatedAt || o.createdAt)}
              </div>
-             <Tag $clr="#10B981" style={{ fontWeight: 900 }}>COMPLETED</Tag>
+             <TacticalBadge $bg="#DCFCE7" $color="#166534" style={{ fontSize: 13, padding: '10px 20px', borderRadius: 16 }}>
+                <CheckCircle size={16} /> COMPLETED
+             </TacticalBadge>
           </div>
         )}
       </MobOrderCard>
@@ -1403,13 +1471,6 @@ export default function OrdersPage() {
     try {
       await updateDocument('orders',orderId,{assignedPartner:name,deliveryPartner:{name:p.name,phone:p.phoneNumber},status:'processing',updatedAt:new Date()});
     } catch { alert('Failed to assign.'); }
-  };
-  const handleCancelOrder=async(orderId:string)=>{
-    if(!confirm('Cancel this order?')) return;
-    try {
-      await updateDocument('orders',orderId,{status:'cancelled',updatedAt:new Date()});
-      await logActivity({action:'ORDER_CANCELLED',actor:'ADMIN',actorName:'Admin',actorId:'admin_panel',details:`Order ${orderId} cancelled`,targetId:orderId});
-    } catch { alert('Failed to cancel.'); }
   };
   const handleMarkDelivered=async(handoverData:any)=>{
     if(!selectedOrder) return;
@@ -2031,6 +2092,13 @@ export default function OrdersPage() {
         </MobViewTabs>
 
         <MobContent>
+          {loading && mobileQueue.all.length === 0 && (
+            <>
+              <div style={{fontSize: 11, fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', marginBottom: 16, letterSpacing: '0.05em'}}>Syncing Live Intelligence...</div>
+              {[1, 2, 3].map(i => <div key={i}>{renderMobSkeleton()}</div>)}
+            </>
+          )}
+
           {mobileTab === 'queue' && (
             <>
               {/* BULK ACTIONS (MOBILE) */}
