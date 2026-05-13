@@ -1884,7 +1884,7 @@ export default function OrdersPage() {
               <div style={{fontSize: 11, color: '#9FE1CB', marginTop: 2}}>Zone: All Active Sectors</div>
             </div>
             <div style={{textAlign: 'right'}}>
-              <div style={{fontSize: 10, color: '#9FE1CB', fontWeight: 800, textTransform: 'uppercase'}}>Today's Progress</div>
+              <div style={{fontSize: 10, color: '#9FE1CB', fontWeight: 800, textTransform: 'uppercase'}}>Today&apos;s Progress</div>
               <div style={{fontSize: 14, fontWeight: 800, color: '#fff'}}>{doneCount} / {openCount + doneCount} done</div>
               <div style={{background: 'rgba(255,255,255,0.15)', borderRadius: 4, height: 4, width: 80, marginTop: 4, overflow: 'hidden', marginLeft: 'auto'}}>
                 <div style={{background: '#5DCAA5', height: '100%', width: `${Math.min(100, (doneCount / (openCount + doneCount || 1)) * 100)}%`}} />
@@ -2456,7 +2456,7 @@ export default function OrdersPage() {
                 
                 <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1a1a1a', paddingBottom: 8 }}>
-                    <span style={{ fontSize: 12, color: '#666' }}>Today's Success</span>
+                    <span style={{ fontSize: 12, color: '#666' }}>Today&apos;s Success</span>
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#10B981' }}>{Math.round((doneCount / (openCount + doneCount || 1)) * 100)}%</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1a1a1a', paddingBottom: 8 }}>
