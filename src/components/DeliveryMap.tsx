@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { GoogleMap, useJsApiLoader, MarkerF, Polyline, InfoWindow, MarkerClusterer } from '@react-google-maps/api';
 import styled from 'styled-components';
-import { FiMapPin, FiTruck, FiCheckCircle, FiXCircle, FiClock, FiNavigation, FiZap, FiSearch } from 'react-icons/fi';
+import { FiMapPin, FiTruck, FiCheckCircle, FiXCircle, FiClock, FiNavigation, FiZap, FiSearch, FiPhone } from 'react-icons/fi';
 
 interface Order {
   id: string;
@@ -19,6 +19,14 @@ interface Order {
     latitude?: number;
     longitude?: number;
     fullAddress?: string;
+  };
+  latitude?: number;
+  longitude?: number;
+  user?: {
+    name?: string;
+    full_name?: string;
+    phoneNumber?: string;
+    phone?: string;
   };
   address?: any;
   raw?: any;
@@ -120,14 +128,14 @@ export const DeliveryMap = ({ orders, warehouse }: DeliveryMapProps) => {
       ['pending', 'processing'].includes(o.status?.toLowerCase())
     );
     pending.forEach(o => {
-      const lat = o.deliveryAddress?.latitude || 
+      const lat = o.latitude || o.deliveryAddress?.latitude || 
                   o.address?.latitude || 
                   o.raw?.latitude || 
                   o.raw?.location?.latitude ||
                   o.raw?.coords?.latitude ||
                   o.raw?.deliveryAddress?.latitude;
                   
-      const lng = o.deliveryAddress?.longitude || 
+      const lng = o.longitude || o.deliveryAddress?.longitude || 
                   o.address?.longitude || 
                   o.raw?.longitude || 
                   o.raw?.location?.longitude ||
@@ -271,14 +279,14 @@ export const DeliveryMap = ({ orders, warehouse }: DeliveryMapProps) => {
           {(clusterer) => (
             <>
               {filteredOrders.map((order, idx) => {
-                const lat = order.deliveryAddress?.latitude || 
+                const lat = order.latitude || order.deliveryAddress?.latitude || 
                             order.address?.latitude || 
                             order.raw?.latitude || 
                             order.raw?.location?.latitude ||
                             order.raw?.coords?.latitude ||
                             order.raw?.deliveryAddress?.latitude;
                             
-                const lng = order.deliveryAddress?.longitude || 
+                const lng = order.longitude || order.deliveryAddress?.longitude || 
                             order.address?.longitude || 
                             order.raw?.longitude || 
                             order.raw?.location?.longitude ||
@@ -358,24 +366,28 @@ export const DeliveryMap = ({ orders, warehouse }: DeliveryMapProps) => {
         {selectedOrder && (
           <InfoWindow
             position={{
-              lat: Number(selectedOrder.deliveryAddress?.latitude || selectedOrder.raw?.latitude || selectedOrder.raw?.location?.latitude || 0),
-              lng: Number(selectedOrder.deliveryAddress?.longitude || selectedOrder.raw?.longitude || selectedOrder.raw?.location?.longitude || 0)
+              lat: Number(selectedOrder.latitude || 0),
+              lng: Number(selectedOrder.longitude || 0)
             }}
             onCloseClick={() => setSelectedOrder(null)}
           >
             <InfoWindowContent>
-              <h3>{selectedOrder.userName || selectedOrder.customerName}</h3>
+              <h3>{selectedOrder.user?.full_name || selectedOrder.user?.name || selectedOrder.userName || selectedOrder.customerName || 'Customer'}</h3>
               <p className="plus"><FiMapPin size={10}/> {selectedOrder.plusCode || 'No Plus Code'}</p>
-              <p className="addr">{selectedOrder.deliveryAddress?.fullAddress || 'Address unavailable'}</p>
+              <p className="addr" style={{ marginBottom: 12 }}>
+                {selectedOrder.deliveryAddress?.fullAddress || (typeof selectedOrder.address === 'string' ? selectedOrder.address : selectedOrder.address?.full) || 'Address unavailable'}
+              </p>
               <div className="actions">
-                <a href={`tel:${selectedOrder.customerPhone}`} className="act-btn"><FiNavigation size={12}/> Call</a>
+                <a href={`tel:${selectedOrder.user?.phoneNumber || selectedOrder.user?.phone || selectedOrder.customerPhone || ''}`} className="act-btn">
+                  <FiPhone size={12}/> Call
+                </a>
                 <a 
-                  href={`https://www.google.com/maps/dir/?api=1&destination=${selectedOrder.deliveryAddress?.latitude},${selectedOrder.deliveryAddress?.longitude}`} 
+                  href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(selectedOrder.plusCode || `${selectedOrder.latitude},${selectedOrder.longitude}`)}`} 
                   target="_blank" 
                   rel="noreferrer"
                   className="act-btn primary"
                 >
-                  <FiNavigation size={12}/> Navigate
+                  <FiNavigation size={12}/> Route
                 </a>
               </div>
             </InfoWindowContent>

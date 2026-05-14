@@ -1,52 +1,38 @@
 @import "tailwindcss";
 
 :root {
-  /* Industrial Precision - Global Dark Mode as Default */
-  --background: #0A0A0A;
-  --foreground: #F8FAFC;
-
-  /* Surface Hierarchy */
-  --color-background-primary: #0A0A0A;
-  --color-background-secondary: #121212;
-  --color-background-tertiary: #1E1E1E;
-  
-  /* Signal Accents */
-  --color-accent-cyan: #00E5FF;
-  --color-accent-green: #A3E635;
-  
-  /* Functional States */
-  --color-background-info: rgba(0, 229, 255, 0.05);
-  --color-background-success: rgba(163, 230, 53, 0.05);
-  --color-background-warning: rgba(251, 191, 36, 0.05);
-  --color-background-danger: rgba(248, 113, 113, 0.05);
-
-  --color-text-primary: #F8FAFC;
-  --color-text-secondary: #94A3B8;
-  --color-text-tertiary: #64748B;
-  --color-text-info: #00E5FF;
-  --color-text-success: #A3E635;
-  --color-text-warning: #FBBF24;
-  --color-text-danger: #F87171;
-
-  /* Technical Borders */
-  --color-border-primary: #2A2A2A;
-  --color-border-secondary: #334155;
-  --color-border-tertiary: rgba(0, 229, 255, 0.1); 
-  
-  /* Precision Radius */
-  --radius-technical: 2px;
-}
-
-/* Light mode fallback (only if explicitly requested via class) */
-.light {
   --background: #FFFFFF;
   --foreground: #1E293B;
+
+  /* Surface Hierarchy */
   --color-background-primary: #FFFFFF;
   --color-background-secondary: #F8FAFC;
   --color-background-tertiary: #F1F5F9;
+  
+  /* Signal Accents */
+  --color-accent-cyan: #185fa5;
+  --color-accent-green: #3b6d11;
+  
+  /* Functional States */
+  --color-background-info: #e6f1fb;
+  --color-background-success: #eaf3de;
+  --color-background-warning: #faeeda;
+  --color-background-danger: #fcebeb;
+
   --color-text-primary: #1E293B;
   --color-text-secondary: #475569;
+  --color-text-tertiary: #64748B;
+  --color-text-info: #185fa5;
+  --color-text-success: #3b6d11;
+  --color-text-warning: #854f0b;
+  --color-text-danger: #a32d2d;
+
+  /* Borders */
   --color-border-primary: #E2E8F0;
+  --color-border-secondary: #CBD5E1;
+  --color-border-tertiary: rgba(0,0,0,0.08); 
+  
+  --radius-technical: 8px;
 }
 
 body {

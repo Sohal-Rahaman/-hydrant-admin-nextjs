@@ -109,7 +109,7 @@ export const subscribeToCollection = (
       if (errorCallback) {
         errorCallback(error);
       } else {
-        console.error('No error callback provided for subscription error');
+        console.error(`⚠️ No error callback provided for subscription error on collection: "${collectionName}". This is a developer error.`);
       }
     }
   );

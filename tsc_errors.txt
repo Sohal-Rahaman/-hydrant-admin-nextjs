@@ -1,0 +1,20 @@
+next.config.ts(7,3): error TS2353: Object literal may only specify known properties, and 'eslint' does not exist in type 'NextConfig'.
+src/app/admin/orders/page.tsx(1455,11): error TS2820: Type '"ORDER_CANCELLED_BULK"' is not assignable to type 'ActivityAction'. Did you mean '"ORDER_CANCELLED"'?
+src/app/admin/orders/page.tsx(1504,11): error TS2820: Type '"ORDER_DELIVERED_BULK"' is not assignable to type 'ActivityAction'. Did you mean '"ORDER_DELIVERED"'?
+src/components/DeliveryHandoverModal.tsx(172,11): error TS2339: Property 'user' does not exist on type 'AuthContextType'.
+src/components/DeliveryHandoverModal.tsx(284,35): error TS2339: Property 'full_name' does not exist on type '{ id: string; }'.
+src/components/DeliveryHandoverModal.tsx(284,59): error TS2339: Property 'name' does not exist on type '{ id: string; }'.
+src/components/DeliveryHandoverModal.tsx(668,26): error TS2304: Cannot find name 'FiZap'.
+src/components/DeliveryHandoverModal.tsx(784,26): error TS2304: Cannot find name 'FiZap'.
+src/components/DeliveryMap.tsx(123,21): error TS2339: Property 'latitude' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(130,21): error TS2339: Property 'longitude' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(274,35): error TS2339: Property 'latitude' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(281,35): error TS2339: Property 'longitude' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(361,41): error TS2339: Property 'latitude' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(362,41): error TS2339: Property 'longitude' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(367,34): error TS2339: Property 'user' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(367,67): error TS2339: Property 'user' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(373,47): error TS2339: Property 'user' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(373,82): error TS2339: Property 'user' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(377,141): error TS2339: Property 'latitude' does not exist on type 'Order'.
+src/components/DeliveryMap.tsx(377,167): error TS2339: Property 'longitude' does not exist on type 'Order'.

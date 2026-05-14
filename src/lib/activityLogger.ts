@@ -23,6 +23,8 @@ export type ActivityAction =
   | 'JAR_MANUAL_RETURN'
   | 'JAR_MANUAL_LOCK'
   | 'JAR_MANUAL_ASSIGN'
+  | 'ORDER_DELIVERED_BULK'
+  | 'ORDER_CANCELLED_BULK'
   | 'OTHER';
 
 export interface LogActivityParams {

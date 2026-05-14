@@ -2,13 +2,38 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  FiX, FiPlus, FiMinus, FiCheckCircle, FiDollarSign, 
+  FiX, FiPlus, FiMinus, FiCheckCircle, FiDollarSign, FiZap,
   FiCamera, FiPackage, FiInfo, FiChevronRight, FiChevronLeft, FiTrash2, FiMaximize, FiRefreshCw,
   FiAlertTriangle
 } from 'react-icons/fi';
 import { Html5Qrcode } from 'html5-qrcode';
-import { db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { db, getUserData, assignJarToCustomer, returnJar } from '@/lib/firebase';
+import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
+import { useAuth } from '@/context/AuthContext';
+
+// --- Helpers ---
+const getTs = (d: any): number => {
+  try {
+    if (!d) return 0;
+    if (typeof d === 'string') return new Date(d).getTime();
+    if (d instanceof Date) return d.getTime();
+    if (typeof d === 'object' && 'toDate' in d) return d.toDate().getTime();
+    if (typeof d === 'object' && d.seconds) return d.seconds * 1000;
+    return 0;
+  } catch { return 0; }
+};
+
+const timeAgo = (d: any): string => {
+  const ts = getTs(d);
+  if (!ts) return 'Unknown';
+  const ms = Date.now() - ts;
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+};
 
 // --- Styled Components (Match provided HTML/CSS aesthetic) ---
 
@@ -108,9 +133,10 @@ interface Props {
 }
 
 const ScannerContainer = styled.div`
-  width: 100%; height: 260px; background: #000; border-radius: 20px;
-  overflow: hidden; position: relative; border: 2px solid #2e2e2e;
-  margin-bottom: 20px;
+  width: 100%; height: 380px; background: #000; border-radius: 24px;
+  overflow: hidden; position: relative; border: 2px solid #333;
+  margin-bottom: 16px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.4);
 `;
 
 const ScannedList = styled.div`
@@ -140,17 +166,46 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
   const [scannerActive, setScannerActive] = useState(false);
   const [cashEntered, setCashEntered] = useState('');
   const [lastScanned, setLastScanned] = useState<string | null>(null);
+  const [isFlashOn, setIsFlashOn] = useState(false);
+  const [hasFlash, setHasFlash] = useState(false);
+  const qrRef = React.useRef<Html5Qrcode | null>(null);
+  const { currentUser: authUser } = useAuth();
+  const [conflict, setConflict] = useState<{
+    type: 'delivery' | 'return';
+    jarId: string;
+    ownerId?: string;
+    ownerName?: string;
+    lastLockedAt?: any;
+  } | null>(null);
+  const [resolvingConflict, setResolvingConflict] = useState(false);
+
+  const toggleFlash = async () => {
+    if (!qrRef.current || !hasFlash) return;
+    try {
+      const newState = !isFlashOn;
+      await qrRef.current.applyVideoConstraints({
+        //@ts-ignore
+        torch: newState
+      });
+      setIsFlashOn(newState);
+    } catch (e) {
+      console.error("Flash toggle failed:", e);
+    }
+  };
+  
   const [scanStatus, setScanStatus] = useState<'success' | 'duplicate' | 'error' | null>(null);
-  const [scanError, setScanError] = useState<string | null>(null); // detailed error for step 2
+  const [scanError, setScanError] = useState<string | null>(null);
   
   // Derived counts from the scanned ID arrays (single source of truth)
   const deliveredCount = deliveredJarIds.length;
   const collectedCount = collectedJarIds.length;
 
-  // Payment logic: if order was pre-paid (wallet/UPI), cash due = 0
+  // Payment logic: if order was pre-paid (wallet/UPI), cash due for ORDER = 0
   const isPrepaid = order?.paymentMethod === 'wallet' || order?.paymentMethod === 'upi';
   const unitPrice = 37; // ₹37 per jar
-  const totalAmount = isPrepaid ? 0 : Math.round(unitPrice * deliveredCount);
+  const orderAmount = isPrepaid ? 0 : Math.round(unitPrice * deliveredCount);
+  const previousDue = walletBalance < 0 ? Math.abs(walletBalance) : 0;
+  const totalAmount = orderAmount + previousDue;
   const netChange = deliveredCount - collectedCount;
 
   // --- Handlers ---
@@ -211,46 +266,46 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
     try {
       const jarRef = doc(db, 'jars', id);
       const jarDoc = await getDoc(jarRef);
-      const jarData = jarDoc.exists() ? jarDoc.data() : null;
+      const jarData = jarDoc.exists() ? (jarDoc.data() as any) : null;
+
+      const uid = user?.id || order?.userId;
+      const cid = user?.customerId || order?.customerId;
 
       if (step === 1) {
-        // For delivery: reject if jar is already locked to someone else
-        if (jarData && jarData.status === 'locked') {
-          setScanStatus('error');
-          setLastScanned(`${id} already in use`);
-          setScanError(`${id} is locked to another customer`);
-          setTimeout(() => { setScanStatus(null); setScanError(null); }, 2000);
+        // For delivery: check if jar is already locked to someone else
+        if (jarData && jarData.status === 'locked' && jarData.currentOwnerId !== uid && jarData.currentOwnerId !== cid) {
+          setScannerActive(false);
+          setScanError('Searching owner details...');
+          const ownerData = await getUserData(jarData.currentOwnerId);
+          setConflict({
+            type: 'delivery',
+            jarId: id,
+            ownerId: jarData.currentOwnerId,
+            ownerName: (ownerData as any)?.full_name || (ownerData as any)?.name || 'Unknown',
+            lastLockedAt: jarData.lastScanAt || jarData.lastLockedAt
+          });
+          setScanError(null);
           playErrorBeep();
           return;
         }
       } else if (step === 2) {
-        // For collection: jar MUST be locked AND locked to THIS order's customer
-        // FIX: Check both UID and CustomerID (HYDRA-XXXX) for identity-aware validation
-        const uid = user?.id || order?.userId;
-        const cid = user?.customerId || order?.customerId;
+        // For collection: jar MUST be locked to THIS order's customer
+        const isOwnerMatch = jarData && (jarData.currentOwnerId === uid || (cid && jarData.currentOwnerId === cid));
 
-        if (!jarData || jarData.status !== 'locked') {
-          setScanStatus('error');
-          setLastScanned(`${id} not locked`);
-          setScanError(`${id} is not assigned to any customer`);
-          setTimeout(() => { setScanStatus(null); setScanError(null); }, 2500);
-          playErrorBeep();
-          return;
-        }
-
-        const isOwnerMatch = (jarData.currentOwnerId === uid) || (cid && jarData.currentOwnerId === cid);
-
-        if (!isOwnerMatch) {
-          setScanStatus('error');
-          setLastScanned(`${id} owner mismatch`);
-          setScanError(`${id} belongs to ${jarData.currentOwnerId}, but current customer is ${cid || uid}`);
-          setTimeout(() => { setScanStatus(null); setScanError(null); }, 4000);
+        if (!jarData || jarData.status !== 'locked' || !isOwnerMatch) {
+          setScannerActive(false);
+          setConflict({
+            type: 'return',
+            jarId: id,
+            ownerId: jarData?.currentOwnerId,
+            ownerName: 'Not assigned to this customer'
+          });
           playErrorBeep();
           return;
         }
       }
     } catch (e) {
-      console.warn("Could not verify jar status, proceeding anyway:", e);
+      console.warn("Jar verification failed:", e);
     }
     // --- END VALIDATION ---
 
@@ -298,6 +353,46 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
     setStep(5);
   };
 
+  const resolveConflict = async () => {
+    if (!conflict) return;
+    setResolvingConflict(true);
+    try {
+      const staffId = authUser?.uid || 'admin';
+      const uid = user?.id || order?.userId;
+      
+      if (conflict.type === 'delivery') {
+        // Instant Unlock and Deliver: Force assign to current customer
+        // We bypass the locked check in firebase.ts by doing it manually here
+        const jarRef = doc(db, 'jars', conflict.jarId);
+        const jarDoc = await getDoc(jarRef);
+        const history = jarDoc.exists() ? (jarDoc.data().history || []) : [];
+        
+        await setDoc(jarRef, {
+          id: conflict.jarId,
+          currentOwnerId: uid,
+          status: 'locked',
+          lastScanAt: new Date(),
+          lastScanBy: staffId,
+          history: [...history, { customerId: uid, timestamp: new Date(), action: 'delivery' }]
+        }, { merge: true });
+        
+        setDeliveredJarIds(prev => [...prev, conflict.jarId]);
+      } else {
+        // Lock and Return: Assign first then return
+        await returnJar(conflict.jarId, staffId, uid);
+        setCollectedJarIds(prev => [...prev, conflict.jarId]);
+      }
+      
+      playSuccessBeep();
+      setConflict(null);
+    } catch (e) {
+      console.error("Conflict resolution failed:", e);
+      alert("Action failed. Please try again.");
+    } finally {
+      setResolvingConflict(false);
+    }
+  };
+
   const addManualJar = () => {
     const id = prompt("Enter Jar ID:");
     if (id) {
@@ -333,15 +428,25 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
         const element = document.getElementById("handover-qr-reader");
         if (!element) return;
 
-        html5QrCode = new Html5Qrcode("handover-qr-reader");
-        await html5QrCode.start(
+        qrRef.current = new Html5Qrcode("handover-qr-reader");
+        await qrRef.current.start(
           { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
+          { fps: 15, qrbox: { width: 300, height: 300 } },
           (decodedText) => {
             if (isMounted) handleScanSuccess(decodedText);
           },
           undefined
         );
+
+        // Check for flash (torch) capability after start
+        try {
+          const track = qrRef.current.getRunningTrackCapabilities();
+          if ((track as any).torch) {
+            setHasFlash(true);
+          }
+        } catch (e) {
+          console.warn("Torch capability check failed:", e);
+        }
       } catch (err) {
         console.warn("Scanner initialization failed (likely div not ready yet):", err);
       }
@@ -353,19 +458,24 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
       return () => {
         clearTimeout(timeout);
         isMounted = false;
-        if (html5QrCode && html5QrCode.isScanning) {
-          html5QrCode.stop().catch(() => {});
+        setIsFlashOn(false);
+        setHasFlash(false);
+        if (qrRef.current && qrRef.current.isScanning) {
+          qrRef.current.stop().catch(() => {});
         }
       };
     }
 
     return () => {
       isMounted = false;
-      if (html5QrCode && html5QrCode.isScanning) {
-        html5QrCode.stop().catch(() => {});
+      setIsFlashOn(false);
+      setHasFlash(false);
+      if (qrRef.current && qrRef.current.isScanning) {
+        qrRef.current.stop().catch(() => {});
       }
     };
   }, [scannerActive, step]);
+
 
   const isStep1Disabled = deliveredCount === 0 || scannerActive;
   const isStep2Disabled = scannerActive;
@@ -405,7 +515,68 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
           {[1, 2, 3, 4, 5].map(s => <Dot key={s} $active={step === s} $done={step > s} />)}
         </StepIndicator>
 
-        <Body>
+        <Body style={{ position: 'relative' }}>
+          <AnimatePresence>
+            {conflict && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                style={{
+                  position: 'absolute', inset: 0, zIndex: 100, background: '#181818',
+                  padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center'
+                }}
+              >
+                <div style={{ width: 64, height: 64, borderRadius: 32, background: 'rgba(239,68,68,0.1)', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
+                  <FiAlertTriangle size={32} />
+                </div>
+                <h3 style={{ fontSize: 18, fontWeight: 800, color: '#f0f0f0', marginBottom: 8 }}>
+                  {conflict.type === 'delivery' ? 'Jar Already Locked' : 'Ownership Mismatch'}
+                </h3>
+                
+                <div style={{ background: '#222', borderRadius: 16, padding: 16, width: '100%', marginBottom: 24, border: '1px solid #2e2e2e' }}>
+                  <div style={{ fontSize: 11, color: '#666', fontWeight: 800, textTransform: 'uppercase', marginBottom: 12 }}>Conflict Details</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#aaa', fontSize: 12 }}>Jar ID</span>
+                      <strong style={{ color: '#f0f0f0', fontSize: 12, fontFamily: 'monospace' }}>{conflict.jarId}</strong>
+                    </div>
+                    {conflict.ownerId && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#aaa', fontSize: 12 }}>Locked With</span>
+                        <strong style={{ color: '#f0f0f0', fontSize: 12 }}>{conflict.ownerName}</strong>
+                      </div>
+                    )}
+                    {conflict.ownerId && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#aaa', fontSize: 12 }}>Customer ID</span>
+                        <strong style={{ color: '#f0f0f0', fontSize: 12 }}>{conflict.ownerId}</strong>
+                      </div>
+                    )}
+                    {conflict.lastLockedAt && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#aaa', fontSize: 12 }}>Locked Since</span>
+                        <strong style={{ color: '#F59E0B', fontSize: 12 }}>{timeAgo(conflict.lastLockedAt)}</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+                  <ActionButton onClick={() => setConflict(null)} style={{ flex: 1 }}>Cancel</ActionButton>
+                  <ActionButton 
+                    $variant="primary" 
+                    onClick={resolveConflict} 
+                    disabled={resolvingConflict}
+                    style={{ flex: 2, background: conflict.type === 'delivery' ? '#EF4444' : '#F59E0B', color: '#fff' }}
+                  >
+                    {resolvingConflict ? 'Processing...' : conflict.type === 'delivery' ? 'Unlock and Deliver' : 'Lock and Return'}
+                  </ActionButton>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <AnimatePresence mode="wait">
             {showRaw ? (
               <motion.div key="raw" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
@@ -484,6 +655,19 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
                     >
                       <FiX />
                     </CircleBtn>
+
+                    {hasFlash && (
+                      <CircleBtn 
+                        onClick={toggleFlash}
+                        style={{ 
+                          position: 'absolute', top: 12, left: 12, zIndex: 10, 
+                          background: isFlashOn ? '#10B981' : 'rgba(0,0,0,0.5)',
+                          color: isFlashOn ? '#000' : '#fff'
+                        }}
+                      >
+                        <FiZap size={18} />
+                      </CircleBtn>
+                    )}
                   </ScannerContainer>
                   <form onSubmit={(e) => {
                     e.preventDefault();
@@ -587,6 +771,19 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
                     >
                       <FiX />
                     </CircleBtn>
+
+                    {hasFlash && (
+                      <CircleBtn 
+                        onClick={toggleFlash}
+                        style={{ 
+                          position: 'absolute', top: 12, left: 12, zIndex: 10, 
+                          background: isFlashOn ? '#10B981' : 'rgba(0,0,0,0.5)',
+                          color: isFlashOn ? '#000' : '#fff'
+                        }}
+                      >
+                        <FiZap size={18} />
+                      </CircleBtn>
+                    )}
                   </ScannerContainer>
                   <form onSubmit={(e) => {
                     e.preventDefault();
@@ -649,39 +846,60 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
               </motion.div>
             ) : step === 3 ? (
               <motion.div key="step3" initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -20, opacity: 0 }}>
-                <CardLabel style={{ textAlign: 'center' }}>
-                  {isPrepaid ? 'Payment Status' : 'Cash to Collect'}
-                </CardLabel>
+                <CardLabel style={{ textAlign: 'center' }}>Total Collection Due</CardLabel>
                 <AmountDisplay>
                   <span className="symbol">₹</span>
-                  <span className="value">{isPrepaid ? 0 : (cashEntered || totalAmount)}</span>
+                  <span className="value">{cashEntered || totalAmount}</span>
                 </AmountDisplay>
 
-                {isPrepaid ? (
-                  <div style={{
-                    background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)',
-                    padding: '16px', borderRadius: '16px', textAlign: 'center', marginTop: '8px'
-                  }}>
-                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>✅</div>
-                    <div style={{ color: '#10B981', fontWeight: '800', fontSize: '15px' }}>Already Paid</div>
-                    <div style={{ color: '#666', fontSize: '12px', marginTop: '4px' }}>
-                      via <strong style={{ color: '#3B82F6', textTransform: 'uppercase' }}>{order?.paymentMethod}</strong> — No cash to collect
-                    </div>
+                {previousDue > 0 && (
+                  <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', padding: '10px 16px', borderRadius: '12px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: '12px', color: '#EF4444', fontWeight: '700' }}>Including Previous Due</div>
+                    <div style={{ fontSize: '13px', color: '#EF4444', fontWeight: '900' }}>₹{previousDue}</div>
                   </div>
-                ) : (
-                  <>
-                    {showPaymentWarning && (
-                      <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', padding: '12px', borderRadius: '12px', fontSize: '12px', color: '#F59E0B', marginBottom: '16px' }}>
-                        <strong>Mismatch:</strong> Due ₹{totalAmount}, Entered ₹{cashEntered}.
-                      </div>
-                    )}
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center', marginBottom: '20px' }}>
+                  {/* Large Centered QR Code */}
+                  <div style={{ width: '240px' }}>
+                    <div style={{ 
+                      background: '#fff', padding: '12px', borderRadius: '24px', 
+                      boxShadow: '0 16px 48px rgba(0,0,0,0.4)', position: 'relative', overflow: 'hidden',
+                      border: '1px solid rgba(255,255,255,0.1)'
+                    }}>
+                      <img 
+                        src="/NEWSCANNER.jpeg" 
+                        alt="Payment QR" 
+                        style={{ width: '100%', borderRadius: '16px', display: 'block' }} 
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          const p = e.currentTarget.parentElement;
+                          if (p) p.innerHTML = '<div style={{height:180px; display:flex; align-items:center; justify-content:center; color:#000; font-size:14px; font-weight:800; text-align:center;}}>QR CODE<br/>UNAVAILABLE</div>';
+                        }}
+                      />
+                      <div style={{ 
+                        position: 'absolute', bottom: 0, left: 0, right: 0, background: '#10B981', 
+                        color: '#000', fontSize: '11px', fontWeight: '900', textAlign: 'center', padding: '6px 0' 
+                      }}>OFFICIAL PAYMENT GATEWAY</div>
+                    </div>
+                    <div style={{ textAlign: 'center', marginTop: '12px', fontSize: '12px', color: '#666', fontWeight: '800', letterSpacing: '0.1em' }}>SCAN TO PAY NOW</div>
+                  </div>
+
+                  {/* Full Width Numpad */}
+                  <div style={{ width: '100%' }}>
                     <NumpadGrid>
                       {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0'].map(n => (
-                        <NumBtn key={n} onClick={() => handleNumPress(n)}>{n}</NumBtn>
+                        <NumBtn key={n} onClick={() => handleNumPress(n)} style={{ height: '52px', fontSize: '18px' }}>{n}</NumBtn>
                       ))}
-                      <NumBtn onClick={handleDelete}><FiX size={20} style={{ margin: '0 auto' }} /></NumBtn>
+                      <NumBtn onClick={handleDelete} style={{ height: '52px' }}><FiX size={20} style={{ margin: '0 auto' }} /></NumBtn>
                     </NumpadGrid>
-                  </>
+                  </div>
+                </div>
+
+                {isPrepaid && totalAmount === previousDue && (
+                  <div style={{ color: '#3B82F6', fontSize: '11px', textAlign: 'center', fontWeight: '700' }}>
+                    * Order is Prepaid. Collecting only Previous Due.
+                  </div>
                 )}
               </motion.div>
             ) : step === 4 ? (
@@ -697,9 +915,23 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
                       <span style={{ color: '#666' }}>Collected</span>
                       <strong style={{ color: '#F59E0B' }}>{collectedCount} Empty</strong>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #2e2e2e', paddingTop: '12px' }}>
-                      <span style={{ color: '#f0f0f0', fontWeight: '700' }}>Amount Collected</span>
-                      <strong style={{ color: '#10B981', fontSize: '18px' }}>₹{isPrepaid ? 0 : (cashEntered || totalAmount)}</strong>
+                    
+                    <div style={{ margin: '8px 0', borderTop: '1px solid #2e2e2e' }} />
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#64748b', fontSize: '13px' }}>Order Amount</span>
+                      <strong style={{ color: '#f0f0f0', fontSize: '13px' }}>₹{orderAmount}</strong>
+                    </div>
+                    {previousDue > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#64748b', fontSize: '13px' }}>Previous Due</span>
+                        <strong style={{ color: '#EF4444', fontSize: '13px' }}>₹{previousDue}</strong>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #2e2e2e', paddingTop: '12px', marginTop: '4px' }}>
+                      <span style={{ color: '#f0f0f0', fontWeight: '700' }}>Total Collected</span>
+                      <strong style={{ color: '#10B981', fontSize: '18px' }}>₹{cashEntered || totalAmount}</strong>
                     </div>
                   </div>
                 </Card>
@@ -749,11 +981,11 @@ export const DeliveryHandoverModal: React.FC<Props> = ({ order, user, walletBala
                 <Card style={{ textAlign: 'left' }}>
                   <div style={{ fontSize: '12px', color: '#666', marginBottom: '12px' }}>Transaction Details</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '13px', color: '#aaa' }}>Status</span>
-                    <strong style={{ fontSize: '13px', color: '#10B981' }}>DELIVERED</strong>
+                    <span style={{ fontSize: '13px', color: '#aaa' }}>Payment Collected</span>
+                    <strong style={{ fontSize: '13px', color: '#10B981' }}>₹{cashEntered || totalAmount}</strong>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '13px', color: '#aaa' }}>Inventory</span>
+                    <span style={{ fontSize: '13px', color: '#aaa' }}>Inventory Change</span>
                     <strong style={{ fontSize: '13px', color: '#3B82F6' }}>{netChange >= 0 ? `+${netChange}` : netChange} Jars</strong>
                   </div>
                 </Card>

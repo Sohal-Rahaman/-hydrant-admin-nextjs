@@ -93,9 +93,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const userRef = doc(db, 'users', user.uid);
         const userDoc = await getDoc(userRef);
-        if (userDoc.exists() && userDoc.data().isAdmin !== true) {
-          await updateDoc(userRef, { isAdmin: true });
-          console.log(`🔑 Auto-synced Firestore Admin flag for ${normalizedRaw}`);
+        if (userDoc.exists() && (userDoc.data().isAdmin !== true || userDoc.data().userType !== 'admin')) {
+          await updateDoc(userRef, { 
+            isAdmin: true,
+            userType: 'admin' 
+          });
+          console.log(`🔑 Auto-synced Firestore Admin flags (isAdmin & userType) for ${normalizedRaw}`);
         }
       } catch (err) {
         console.warn('⚠️ Auto-heal permissions failed (Likely due to rules already blocking it):', err);
@@ -117,9 +120,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const userRef = doc(db, 'users', user.uid);
         const userDoc = await getDoc(userRef);
-        if (userDoc.exists() && userDoc.data().isAdmin !== true) {
-          await updateDoc(userRef, { isAdmin: true });
-          console.log(`💎 Auto-synced SuperAdmin flag for ${normalizedRaw}`);
+        if (userDoc.exists() && (userDoc.data().isAdmin !== true || userDoc.data().userType !== 'admin')) {
+          await updateDoc(userRef, { 
+            isAdmin: true,
+            userType: 'admin'
+          });
+          console.log(`💎 Auto-synced SuperAdmin flags (isAdmin & userType) for ${normalizedRaw}`);
         }
       } catch (err) {}
 

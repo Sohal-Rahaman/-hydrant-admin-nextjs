@@ -23,7 +23,8 @@ import {
   Wallet, 
   ChevronRight,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Calendar
 } from 'lucide-react';
 import { subscribeToCollection, updateDocument, db, assignJarToCustomer, returnJar, subscribeToLiveStatus } from '@/lib/firebase';
 import UserInsightDrawer from '@/components/UserInsightDrawer';
@@ -41,6 +42,7 @@ interface Order {
   customerName?: string;
   status: 'pending'|'processing'|'completed'|'cancelled'|'canceled'|'placed'|'confirmed'|'in_progress'|'out_for_delivery'|'delivered';
   quantity: number; amount: number;
+  latitude?: number; longitude?: number;
   address?: { street: string; city: string; pincode: string; full?: string; latitude?: number; longitude?: number };
   deliveryAddress?: { id?: string; type?: string; fullAddress?: string; address_line?: string; latitude?: number; longitude?: number };
   createdAt: Date|{toDate():Date}|string;
@@ -59,6 +61,7 @@ interface Order {
   [key: string]: any;
 }
 interface User { id:string; name:string; phoneNumber:string; wallet_balance:number; jars_occupied:number; customerId?:string; userId?:string; [key: string]: any; }
+interface Address { id?: string; userId: string; plus_code?: string; plusCode?: string; isDefault?: boolean; [key: string]: any; }
 interface ArmyMember { id:string; name:string; phoneNumber:string; isOnline:boolean; activeOrdersCount:number }
 
 /* ── Helpers ────────────────────────────────────────────────── */
@@ -98,7 +101,7 @@ const dist = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   return R * c;
 };
 
-const WAREHOUSE = { lat: 22.6362, lng: 88.4299 };
+const WAREHOUSE = { lat: 22.6235678, lng: 88.3973154 }; // JCG3+72Q (HUB)
 
 const timeAgo = (d:any):string => {
   const ms = Date.now() - getTs(d);
@@ -866,6 +869,7 @@ const LiveStatusBadge = ({ orderId, initialStatus }: { orderId: string; initialS
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [addresses, setAddresses] = useState<Address[]>([]);
   const [armyMembers, setArmyMembers] = useState<ArmyMember[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -982,7 +986,7 @@ export default function OrdersPage() {
             orderType:String(d.orderType||(d.subscriptionId?'subscription':'regular')) as Order['orderType'],
             deliverySlot:d.deliverySlot, deliveryDate:d.deliveryDate,
             isPriority:d.isPriority, assignedPartner:d.assignedPartner,
-            plusCode:d.plusCode||d.deliveryAddress?.plusCode||d.address?.plusCode,
+            plusCode:d.plusCode || d.plus_code || d.deliveryAddress?.plusCode || d.deliveryAddress?.plus_code || d.address?.plusCode || d.address?.plus_code,
             floorNumber:d.floorNumber||d.deliveryAddress?.floor||d.address?.floor,
             hasLift:d.hasLift??d.deliveryAddress?.hasLift??d.address?.hasLift,
             isAddressVerified:d.isAddressVerified??d.deliveryAddress?.isVerified??d.address?.isVerified,
@@ -1025,40 +1029,76 @@ export default function OrdersPage() {
           jars_occupied:doc.data().jars_occupied ?? doc.data().holdJars ?? doc.data().occupiedJars ?? 0,
         })) as User[]);
       } catch { setUsers([]); }
-    }, [], ()=>setUsers([]));
+    }, [], (err) => {
+      console.error('❌ Users subscription error:', err);
+      setUsers([]);
+    });
 
     const unsubArmy = subscribeToCollection('army', (snap) => {
       try { setArmyMembers(snap.docs.map(doc=>({id:doc.id,...doc.data()})) as ArmyMember[]); } catch {}
-    }, [], ()=>{});
+    }, [], (err) => console.error('❌ Army subscription error:', err));
+
+    const unsubAddr = subscribeToCollection('addresses', (snap) => {
+      try { setAddresses(snap.docs.map(doc=>({id:doc.id,...doc.data()})) as Address[]); } catch {}
+    }, [], (err) => console.error('❌ Addresses subscription error:', err));
 
     setTimeout(()=>setLoading(false),1200);
-    return ()=>{ unsubOrders(); unsubUsers(); unsubArmy(); };
+    return ()=>{ unsubOrders(); unsubUsers(); unsubArmy(); unsubAddr(); };
   }, []);
+
+  const enrichedOrders = useMemo(() => {
+    return orders.map(o => {
+      const user = users.find(u => u.id === o.userId);
+      const userAddrs = addresses.filter(a => a.userId === o.userId);
+      const defaultAddr = userAddrs.find(a => a.isDefault) || userAddrs[0];
+
+      const pc = o.plusCode || user?.plusCode || user?.plus_code || 
+                 o.raw?.deliveryAddress?.plusCode || o.raw?.deliveryAddress?.plus_code || 
+                 o.raw?.address?.plusCode || o.raw?.address?.plus_code ||
+                 defaultAddr?.plusCode || defaultAddr?.plus_code;
+
+      const lat = o.latitude || o.raw?.latitude || o.raw?.deliveryAddress?.latitude || o.raw?.address?.latitude || 
+                  user?.latitude || user?.deliveryAddress?.latitude || 
+                  defaultAddr?.latitude || defaultAddr?.lat;
+                  
+      const lng = o.longitude || o.raw?.longitude || o.raw?.deliveryAddress?.longitude || o.raw?.address?.longitude || 
+                  user?.longitude || user?.deliveryAddress?.longitude || 
+                  defaultAddr?.longitude || defaultAddr?.lng;
+
+      return {
+        ...o,
+        plusCode: pc,
+        latitude: lat,
+        longitude: lng,
+        user
+      };
+    });
+  }, [orders, users, addresses]);
 
   /* Filter effect */
   useEffect(() => {
-    let f = orders;
-    if (activeTab==='open') f=orders.filter(o=>['placed','pending','confirmed','processing','in_progress','out_for_delivery'].includes(o.status?.toLowerCase()));
-    else if (activeTab==='completed') f=orders.filter(o=>['completed','delivered'].includes(o.status?.toLowerCase()));
-    else if (activeTab==='cancelled') f=orders.filter(o=>['cancelled','canceled'].includes(o.status?.toLowerCase()));
-    else if (activeTab==='statement') f=orders; // all orders for statement
+    let f = enrichedOrders;
+    if (activeTab==='open') f=f.filter(o=>['placed','pending','confirmed','processing','in_progress','out_for_delivery'].includes(o.status?.toLowerCase()));
+    else if (activeTab==='completed') f=f.filter(o=>['completed','delivered'].includes(o.status?.toLowerCase()));
+    else if (activeTab==='cancelled') f=f.filter(o=>['cancelled','canceled'].includes(o.status?.toLowerCase()));
+    else if (activeTab==='statement') f=f; // all orders for statement
     if (searchTerm) {
       const t=searchTerm.toLowerCase();
       f=f.filter(o=>{
-        const u=getUserDetails(o.userId);
+        const u=o.user || getUserDetails(o.userId);
         return o.userName?.toLowerCase().includes(t)||o.userPhone?.includes(searchTerm)||
-          o.address.pincode?.includes(searchTerm)||u?.name?.toLowerCase().includes(t)||
-          o.id.toLowerCase().includes(t);
+          o.address?.pincode?.includes(searchTerm)||u?.name?.toLowerCase().includes(t)||
+          o.id.toLowerCase().includes(t) || o.plusCode?.toLowerCase().includes(t);
       });
     }
     setFilteredOrders(f);
-  }, [searchTerm,orders,users,activeTab]);
+  }, [searchTerm,enrichedOrders,users,activeTab]);
 
   /* ── Mobile Priority Sorting Logic ── */
   const mobileQueue = useMemo(() => {
     // Only process open orders for the active queue
     const openStatus = ['placed','pending','confirmed','processing','in_progress','out_for_delivery'];
-    let queueOrders = orders.filter(o => openStatus.includes(o.status?.toLowerCase() || ''));
+    let queueOrders = enrichedOrders.filter(o => openStatus.includes(o.status?.toLowerCase() || ''));
 
     // Apply same search filter as desktop for consistency
     if (searchTerm) {
@@ -1106,8 +1146,8 @@ export default function OrdersPage() {
         let minDist = Infinity;
 
         unvisited.forEach((o, i) => {
-          const lat = o.deliveryAddress?.latitude || o.raw?.latitude || WAREHOUSE.lat;
-          const lng = o.deliveryAddress?.longitude || o.raw?.longitude || WAREHOUSE.lng;
+          const lat = o.latitude || o.deliveryAddress?.latitude || o.raw?.latitude || WAREHOUSE.lat;
+          const lng = o.longitude || o.deliveryAddress?.longitude || o.raw?.longitude || WAREHOUSE.lng;
           const d = dist(currentPos.lat, currentPos.lng, lat, lng);
           if (d < minDist) {
             minDist = d;
@@ -1267,23 +1307,26 @@ export default function OrdersPage() {
             <span style={{ fontSize: 17, fontWeight: 700 }}>{o.deliveryAddress?.fullAddress || o.deliveryAddress?.address_line || o.address?.street || 'No Address Provided'}</span>
           </MobCardAddress>
 
-          <MobDetailRow style={{ marginTop: 24 }}>
+          <MobDetailRow style={{ marginTop: 24, flexWrap: 'wrap', gap: 8 }}>
+            <TacticalBadge $bg="#F1F5F9" $color="#64748B" style={{ padding: '8px 16px', borderRadius: 14 }}>
+               <Clock size={14} /> 
+               Placed: {new Date(getTs(o.createdAt)).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            </TacticalBadge>
+
+            <TacticalBadge 
+              $bg={o.deliverySlot?.toLowerCase().includes('morning') ? '#FEF3C7' : o.deliverySlot?.toLowerCase().includes('afternoon') ? '#DBEAFE' : '#F3E8FF'} 
+              $color={o.deliverySlot?.toLowerCase().includes('morning') ? '#92400E' : o.deliverySlot?.toLowerCase().includes('afternoon') ? '#1E40AF' : '#6B21A8'}
+              style={{ padding: '8px 16px', borderRadius: 14 }}
+            >
+              <Calendar size={14} />
+              {o.deliveryDate ? fmt(o.deliveryDate) : 'Today'} • {o.deliverySlot || 'Express'}
+            </TacticalBadge>
+
             <TacticalBadge $bg="#111827" $color="#fff" style={{ padding: '8px 16px', borderRadius: 14 }}>
               <Package size={14} />
               {o.quantity} Jars
             </TacticalBadge>
             
-            {o.deliverySlot && (
-               <TacticalBadge 
-                 $bg={o.deliverySlot.toLowerCase().includes('morning') ? '#FEF3C7' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#DBEAFE' : '#F3E8FF'} 
-                 $color={o.deliverySlot.toLowerCase().includes('morning') ? '#92400E' : o.deliverySlot.toLowerCase().includes('afternoon') ? '#1E40AF' : '#6B21A8'}
-                 style={{ padding: '8px 16px', borderRadius: 14 }}
-               >
-                 <Clock size={16} />
-                 {o.deliverySlot}
-               </TacticalBadge>
-            )}
-
             {o.paymentMethod && (
               <TacticalBadge 
                 $bg={(['wallet', 'upi', 'razorpay'].includes(o.paymentMethod.toLowerCase())) ? '#F5F3FF' : (o.paymentMethod.toLowerCase() === 'cash' ? '#ECFDF5' : '#FFFBEB')} 
@@ -1300,27 +1343,13 @@ export default function OrdersPage() {
         {!isDone && (
           <MobActionGrid>
             <BigActionBtn $variant="call" onClick={() => handleCall(phone)}>
-              <Player 
-                autoplay 
-                loop 
-                src="https://lottie.host/0e6c6c4e-5e2e-4b41-9a70-8b06d48c95e1/call.json" 
-                style={{ width: 22, height: 22 }} 
-              /> CALL
+              <Phone size={22} /> CALL
             </BigActionBtn>
             <BigActionBtn $variant="nav" onClick={() => handleNavigation(o)}>
-              <Player 
-                autoplay 
-                loop 
-                src="https://lottie.host/9e8b7c6a-4d2b-4e1f-8c3a-9b8a7c6d5e4f/map.json" 
-                style={{ width: 22, height: 22 }} 
-              /> MAP
+              <Navigation size={22} /> MAP
             </BigActionBtn>
             <BigActionBtn $variant="done" onClick={() => handleDeliveryClick(o)}>
-              <Player 
-                autoplay 
-                src="https://lottie.host/8b8a1b6c-5e4f-3d2b-9c3f-4e5a7e0b5d5d/success.json" 
-                style={{ width: 28, height: 28 }} 
-              /> DELIVERED
+              <CheckCircle size={24} /> DELIVERED
             </BigActionBtn>
             <BigActionBtn $variant="cancel" onClick={() => handleCancelOrder(o.id)}>
               <X size={18} /> Cancel
@@ -1341,24 +1370,45 @@ export default function OrdersPage() {
       </MobOrderCard>
     );
   };
-  const handleNavigation=(o:Order)=>{
-    const lat = o.deliveryAddress?.latitude || o.raw?.latitude || o.raw?.location?.latitude;
-    const lng = o.deliveryAddress?.longitude || o.raw?.longitude || o.raw?.location?.longitude;
-    const plusCode = o.plusCode || o.raw?.plusCode;
+  const handleNavigation = (o: Order) => {
+    const user = getUserDetails(o.userId);
+    const hub = 'JCG3+72Q';
+    
+    // Prioritize Plus Code as requested for highest accuracy (Check all naming variations)
+    // 1. Check Order directly
+    // 2. Check User profile
+    // 3. Check Addresses collection for this user
+    const userAddrs = addresses.filter(a => a.userId === o.userId);
+    const defaultAddr = userAddrs.find(a => a.isDefault) || userAddrs[0];
+
+    const plusCode = o.plusCode || o.raw?.plusCode || o.raw?.plus_code || 
+                    user?.plusCode || user?.plus_code || 
+                    user?.deliveryAddress?.plusCode || user?.deliveryAddress?.plus_code || 
+                    user?.address?.plusCode || user?.address?.plus_code ||
+                    defaultAddr?.plusCode || defaultAddr?.plus_code;
+    
+    if (plusCode && plusCode.includes('+')) {
+      // Direct navigation to Plus Code (Google Maps will use current location as origin)
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(plusCode)}`, '_blank');
+      return;
+    }
+
+    // Fallback 1: GPS Coordinates
+    const lat = o.deliveryAddress?.latitude || o.raw?.latitude || o.raw?.location?.latitude || user?.deliveryAddress?.latitude;
+    const lng = o.deliveryAddress?.longitude || o.raw?.longitude || o.raw?.location?.longitude || user?.deliveryAddress?.longitude;
     
     if (lat && lng) {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
       return;
     }
-    
-    if (plusCode) {
-      window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(plusCode)}`, '_blank');
+
+    // Fallback 2: Full Text Address
+    const dest = o.address.full?.trim() || `${o.address.street}, ${o.address.city} ${o.address.pincode}`;
+    if (!dest || dest.includes('N/A')) {
+      alert('No precise location info found for this customer.');
       return;
     }
-
-    const dest=o.address.full?.trim()||`${o.address.street}, ${o.address.city} ${o.address.pincode}`;
-    if(!dest){alert('No address info found');return;}
-    window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(dest)}`,'_blank');
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`, '_blank');
   };
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const handleCancelOrder = (orderId: string) => {
@@ -2036,54 +2086,7 @@ export default function OrdersPage() {
           <span>●●●</span>
         </MobStatusBar>
 
-        <MobTopBar>
-          <MobTopBarRow>
-            <div>
-              <div style={{fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6}}>
-                <div style={{width: 8, height: 8, borderRadius: '50%', background: '#5DCAA5'}} />
-                Ops Console
-              </div>
-              <div style={{fontSize: 11, color: '#9FE1CB', marginTop: 2}}>Zone: All Active Sectors</div>
-            </div>
-            <div style={{textAlign: 'right'}}>
-              <div style={{fontSize: 10, color: '#9FE1CB', fontWeight: 800, textTransform: 'uppercase'}}>Today&apos;s Progress</div>
-              <div style={{fontSize: 14, fontWeight: 800, color: '#fff'}}>{doneCount} / {openCount + doneCount} done</div>
-              <div style={{background: 'rgba(255,255,255,0.15)', borderRadius: 4, height: 4, width: 80, marginTop: 4, overflow: 'hidden', marginLeft: 'auto'}}>
-                <div style={{background: '#5DCAA5', height: '100%', width: `${Math.min(100, (doneCount / (openCount + doneCount || 1)) * 100)}%`}} />
-              </div>
-            </div>
-          </MobTopBarRow>
 
-          {/* Logistics Quick Info */}
-          <div style={{ marginTop: 12, padding: '8px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: 12 }}>
-               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                 <span style={{ fontSize: 8, color: '#9FE1CB', fontWeight: 800 }}>EST. DISTANCE</span>
-                 <span style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>{mobileQueue.all.length > 0 ? (mobileQueue.all.length * 1.2).toFixed(1) : 0} KM</span>
-               </div>
-               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                 <span style={{ fontSize: 8, color: '#9FE1CB', fontWeight: 800 }}>FUEL COST</span>
-                 <span style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>₹{mobileQueue.all.length > 0 ? (mobileQueue.all.length * 1.2 * 3.5).toFixed(0) : 0}</span>
-               </div>
-            </div>
-            <div style={{ background: '#5DCAA5', color: '#0F6E56', fontSize: 9, fontWeight: 900, padding: '3px 8px', borderRadius: 6 }}>OPTIMIZED</div>
-          </div>
-          
-          <MobStatsRow>
-            <MobStatPill>
-              <div className="val">{mobileQueue.fast.length}</div>
-              <div className="lbl">Fast Pending</div>
-            </MobStatPill>
-            <MobStatPill>
-              <div className="val">{mobileQueue.morning.length + mobileQueue.afternoon.length + mobileQueue.evening.length}</div>
-              <div className="lbl">Slot Pending</div>
-            </MobStatPill>
-            <MobStatPill>
-              <div className="val">Online</div>
-              <div className="lbl">{armyMembers.filter(m => m.isOnline).length} Partners</div>
-            </MobStatPill>
-          </MobStatsRow>
-        </MobTopBar>
 
         <MobViewTabs>
           <MobViewTab $active={mobileTab === 'queue'} onClick={() => setMobileTab('queue')}>Queue</MobViewTab>
@@ -2125,6 +2128,10 @@ export default function OrdersPage() {
                 <MobSumCard $clr="#185FA5">
                   <div className="val">{mobileQueue.afternoon.length}</div>
                   <div className="lbl">Afternoon</div>
+                </MobSumCard>
+                <MobSumCard $clr="#8B5CF6">
+                  <div className="val">{mobileQueue.evening.length}</div>
+                  <div className="lbl">Evening</div>
                 </MobSumCard>
               </MobSummaryStrip>
 
@@ -2182,7 +2189,7 @@ export default function OrdersPage() {
                  <div style={{fontSize: 16, fontWeight: 800, marginTop: 4}}>{mobileQueue.all.length} Waypoints Active</div>
                  <div style={{fontSize: 12, color: '#555', marginTop: 4}}>Stops are ordered by Priority (Fast Delivery → Morning → Afternoon → Evening)</div>
                  
-                 <DeliveryMap orders={orders} warehouse={WAREHOUSE} />
+              <DeliveryMap orders={filteredOrders} warehouse={WAREHOUSE} />
               </div>
 
               {mobileQueue.all.length === 0 ? (
