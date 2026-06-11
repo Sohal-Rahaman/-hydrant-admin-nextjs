@@ -377,10 +377,12 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { path: '/admin/orders', label: 'Live Orders', icon: FiPackage, permission: 'orders', category: 'OPERATIONS' },
     { path: '/admin/users?mode=fleet', label: 'Fleet Board', icon: FiGrid, permission: 'fleet', category: 'OPERATIONS' },
     { path: '/admin/jars', label: 'Jar Holdings', icon: FiArchive, permission: 'inventory', category: 'OPERATIONS' },
+    { path: '/admin/jar-pickups', label: 'Jar Pickups', icon: FiTruck, permission: 'inventory', category: 'OPERATIONS' },
     { path: '/admin/army', label: 'Army Management', icon: FiTruck, permission: 'fleet', category: 'OPERATIONS' },
     { path: '/admin/delivery', label: 'Delivery Map', icon: FiMapPin, permission: 'fleet', category: 'OPERATIONS' },
     
     // BUSINESS
+    { path: '/admin/b2b', label: 'B2B Console', icon: FiBriefcase, permission: 'orders', category: 'BUSINESS' },
     { path: '/admin/crm', label: 'CRM & Leads', icon: FiBriefcase, permission: 'crm', category: 'BUSINESS' },
     { path: '/admin/pro-control', label: 'PRO Control Center', icon: FiShield, permission: 'orders', category: 'BUSINESS' },
     { path: '/admin/wallet', label: 'Wallet Mgmt', icon: FiCreditCard, permission: 'wallet', category: 'BUSINESS' },
@@ -391,6 +393,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     // SYSTEM
     { path: '/admin/support', label: 'Support Tickets', icon: FiMessageSquare, permission: 'support', category: 'SYSTEM' },
     { path: '/admin/admins', label: 'Manage Roles', icon: FiLock, permission: 'staff', category: 'SYSTEM' },
+    { path: '/admin/security', label: 'Security Center', icon: FiShield, permission: 'staff', category: 'SYSTEM', superadminOnly: true },
     { path: '/admin/analytics', label: 'Analytics', icon: FiBarChart, permission: 'analytics', category: 'SYSTEM' },
     { path: '/admin/activity', label: 'Activity Log', icon: FiActivity, permission: 'staff', category: 'SYSTEM' },
     { path: '/admin/notifications', label: 'Notifications', icon: FiBell, permission: 'all', category: 'SYSTEM' },
@@ -398,6 +401,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
 
   const { permissions = [], role } = useAuth();
   const filteredNavigationItems = navigationItems.filter(item => {
+    if ((item as any).superadminOnly && role !== 'superadmin') return false;
     // Grant full access if permissions include 'all' OR if role is admin/superadmin
     if (permissions.includes('all') || role === 'superadmin' || role === 'admin') return true;
     return permissions.includes(item.permission);

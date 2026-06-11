@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import {
-  subscribeToCollection, updateDocument, addDocument, deleteDocument
+  subscribeToCollection, updateDocument, addDocument, deleteDocument, assignJarToCustomer, returnJar
 } from '@/lib/firebase';
 import { 
   FiSearch, FiGift, FiCopy, FiPhoneCall, FiBell, FiSlash, 
@@ -17,6 +17,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { mergeUserAccounts } from '@/lib/merge-utils';
 import * as XLSX from 'xlsx';
+import { logActivity } from '@/lib/activityLogger';
 
 // ─── Types ────────────────────────────────────────────────
 interface Address {
@@ -69,8 +70,11 @@ interface User {
   free_onboard?: boolean;
   subscription_active?: boolean;
   total_orders?: number;
+  jar_deposit_amount?: number;
+  pro_plan_tier?: number;
   addresses?: Address[]; orders?: Order[];
 }
+
 
 // ─── Helpers ──────────────────────────────────────────────
 const fmt = (d?: { toDate(): Date } | Date | string | null) => {
@@ -518,6 +522,7 @@ export default function UsersPage() {
   const [fPay, setFPay] = useState('');
   const [fSlot, setFSlot] = useState('');
   const [fSearch, setFSearch] = useState('');
+  const [fSort, setFSort] = useState('newest');
 
   // txn filters
   const [ftType, setFtType] = useState('');
@@ -529,8 +534,10 @@ export default function UsersPage() {
   const [adjReason, setAdjReason] = useState('');
 
   // jar
-  const [jarCount, setJarCount] = useState('');
-  const [jarReason, setJarReason] = useState('');
+  const [newJarId, setNewJarId] = useState('');
+  const [isProcessingJar, setIsProcessingJar] = useState(false);
+  const [jarDepositAmount, setJarDepositAmount] = useState<number>(200);
+  const [proPlanTier, setProPlanTier] = useState<number>(15);
 
   // maintenance & cleanup
   const [matchingGroups, setMatchingGroups] = useState<User[][]>([]);
@@ -542,6 +549,7 @@ export default function UsersPage() {
   // per-user caches
   const [userOrders, setUserOrders] = useState<Order[]>([]);
   const [userTxns, setUserTxns] = useState<Transaction[]>([]);
+  const [userJars, setUserJars] = useState<any[]>([]);
   const [editFields, setEditFields] = useState<Partial<User>>({});
   const [saving, setSaving] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
@@ -667,25 +675,32 @@ export default function UsersPage() {
 
   // Per-user order/txn live subscription
   useEffect(() => {
-    if (!selected) return;
+    if (!selected) {
+      setUserJars([]);
+      return;
+    }
     const uo = orders.filter(o => o.userId === selected.id);
     setUserOrders(uo);
     const unsubTxns = subscribeToCollection('transactions', snap => {
       setUserTxns(snap.docs.map(d => ({ id: d.id, ...d.data() } as Transaction)));
     }, [where('userId', '==', selected.id)]);
-    return () => unsubTxns();
+    const unsubJars = subscribeToCollection('jars', snap => {
+      setUserJars(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, [where('currentOwnerId', 'in', [selected.id, selected.customerId].filter(Boolean))]);
+    return () => { unsubTxns(); unsubJars(); };
   }, [selected, orders]);
 
   // Whenever user is selected, seed edit fields and jar count
   useEffect(() => {
     if (!selected) return;
     setEditFields({
-      full_name: selected.full_name || selected.name || '',
-      email: selected.email || '',
+      full_name: selected.full_name || selected.displayName || '',
+      email: (selected as any).email || '',
       phone: (selected as any).phone || selected.phoneNumber || '',
       alt_phone: (selected as any).alt_phone || '',
     });
-    setJarCount(String(selected.jars_occupied || 0));
+    setJarDepositAmount(selected.jar_deposit_amount ?? 200);
+    setProPlanTier(selected.pro_plan_tier ?? 15);
     setTab('overview');
     setExpandedOrder(null);
     setFStatus(''); setFPay(''); setFSlot(''); setFSearch('');
@@ -814,23 +829,69 @@ export default function UsersPage() {
     setSaving(false);
   };
 
-  // ── Handle jar correction ──
-  const handleJarCorrection = async () => {
+  // ── Handle Jar Assignment & Return ──
+  const handleAssignJar = async () => {
+    if (!selected || !newJarId.trim()) return;
+    let finalId = newJarId.trim().toUpperCase();
+    if (/^\d+$/.test(finalId)) finalId = `HYD-JAR-${finalId.padStart(4, '0')}`;
+    else if (!finalId.startsWith('HYD-JAR-')) finalId = `HYD-JAR-${finalId}`;
+
+    setIsProcessingJar(true);
+    try {
+      const staffId = userData?.id || 'admin_panel';
+      const ident = selected.customerId || selected.id;
+      await assignJarToCustomer(finalId, ident, staffId);
+      await updateDocument('users', selected.id, { jars_occupied: userJars.length + 1 });
+      await logActivity({
+        action: 'JAR_MANUAL_ASSIGN',
+        actor: 'ADMIN',
+        actorName: userData?.full_name || 'Admin',
+        actorId: staffId,
+        details: `Manually assigned jar ${finalId} to user ${selected.customerId || selected.id}`,
+        targetId: selected.id
+      });
+      showToast(`Jar ${finalId} assigned successfully`);
+      setNewJarId('');
+    } catch (e: any) { showToast(`Error: ${e.message || 'Failed to assign jar'}`); }
+    setIsProcessingJar(false);
+  };
+
+  const handleReturnJar = async (jarId: string) => {
     if (!selected) return;
-    const count = parseInt(jarCount);
-    if (isNaN(count) || count < 0) { showToast('Enter a valid jar count'); return; }
+    if (!confirm(`Unlock jar ${jarId}?`)) return;
+    setIsProcessingJar(true);
+    try {
+      const staffId = userData?.id || 'admin_panel';
+      await returnJar(jarId, staffId, selected.customerId || selected.id);
+      await updateDocument('users', selected.id, { jars_occupied: Math.max(0, userJars.length - 1) });
+      await logActivity({
+        action: 'JAR_MANUAL_RETURN',
+        actor: 'ADMIN',
+        actorName: userData?.full_name || 'Admin',
+        actorId: staffId,
+        details: `Manually returned jar ${jarId} from user ${selected.customerId || selected.id}`,
+        targetId: selected.id
+      });
+      showToast(`Jar ${jarId} unlocked successfully`);
+    } catch (e: any) { showToast(`Error: ${e.message || 'Failed to return jar'}`); }
+    setIsProcessingJar(false);
+  };
+
+  const handleFinancialSave = async () => {
+    if (!selected) return;
     setSaving(true);
     try {
-      await updateDocument('users', selected.id, { jars_occupied: count });
-      await addDocument('activity_logs', {
-        action: 'jar_correction', userId: selected.id,
-        adminId: userData?.id, oldValue: selected.jars_occupied,
-        newValue: count, reason: jarReason || 'Manual correction',
-        createdAt: serverTimestamp(),
-      });
-      showToast('Jar count updated & audit logged');
-      setJarReason('');
-    } catch (e) { showToast('Error — check console'); }
+      const data: any = {};
+      if (selected.customer_status === 'DEPOSIT_CUSTOMER') {
+        data.jar_deposit_amount = jarDepositAmount;
+      } else if (selected.customer_status === 'PRO_CUSTOMER') {
+        data.pro_plan_tier = proPlanTier;
+      }
+      await updateDocument('users', selected.id, data);
+      showToast('Financial settings updated');
+    } catch (e) {
+      showToast('Error updating financial settings');
+    }
     setSaving(false);
   };
 
@@ -949,6 +1010,20 @@ export default function UsersPage() {
     } catch (e) { showToast('Error deleting user — check console'); console.error(e); }
     setSaving(false);
   };
+  const getTs = (o: any) => {
+    const t = o.createdAt;
+    if (!t) return 0;
+    if (typeof t.toDate === 'function') return t.toDate().getTime();
+    if (t instanceof Date) return t.getTime();
+    return new Date(t).getTime();
+  };
+  const getDeliveryTs = (o: any) => {
+    const t = o.handover?.completedAt ?? o.raw?.completedAt;
+    if (!t) return 0;
+    if (typeof t.toDate === 'function') return t.toDate().getTime();
+    if (t instanceof Date) return t.getTime();
+    return new Date(t).getTime();
+  };
   const filteredOrders = userOrders.filter(o => {
     const s = o.status?.toLowerCase();
     const fs = fStatus.toLowerCase();
@@ -958,6 +1033,11 @@ export default function UsersPage() {
       (!fSlot || String(o.slot) === fSlot) &&
       (!fSearch || o.id.toLowerCase().includes(fSearch.toLowerCase()))
     );
+  }).sort((a, b) => {
+    if (fSort === 'oldest') return getTs(a) - getTs(b);
+    if (fSort === 'delivery_newest') return getDeliveryTs(b) - getDeliveryTs(a);
+    if (fSort === 'delivery_oldest') return getDeliveryTs(a) - getDeliveryTs(b);
+    return getTs(b) - getTs(a); // newest first (default)
   });
 
   const filteredTxns = userTxns.filter(t =>
@@ -1157,9 +1237,17 @@ export default function UsersPage() {
     const walletRev = oDelivered(userOrders).filter(o => o.paymentMethod === 'wallet').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
     const cashRev   = oDelivered(userOrders).filter(o => o.paymentMethod === 'cash').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
     const upiRev    = oDelivered(userOrders).filter(o => o.paymentMethod !== 'wallet' && o.paymentMethod !== 'cash').reduce((s, o) => s + (o.totalAmount || o.amount || 0), 0);
-    const recent = userOrders.slice(0, 4);
+    const getTs = (o: Order) => {
+      const t = o.createdAt as any;
+      if (!t) return 0;
+      if (typeof t.toMillis === 'function') return t.toMillis();
+      if (typeof t.toDate === 'function') return t.toDate().getTime();
+      return new Date(t).getTime() || 0;
+    };
+    const recent = [...userOrders].sort((a, b) => getTs(b) - getTs(a)).slice(0, 5);
+
     return (
-      <>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <Metrics $cols={4}>
           <Metric><ML>Total orders</ML><MV>{tot}</MV><MSub>All time</MSub></Metric>
           <Metric><ML>Delivered</ML><MV $color="var(--color-text-success)">{del}</MV><MSub>{tot ? Math.round(del / tot * 100) : 0}% success rate</MSub></Metric>
@@ -1182,33 +1270,8 @@ export default function UsersPage() {
           </div>
         </div>
 
-        <SectionTitle>Recent orders</SectionTitle>
-        <Table>
-          <thead><tr>
-            <Th>Order ID</Th><Th>Date</Th><Th>Jars</Th><Th>Amount</Th><Th>Payment</Th><Th>Status</Th>
-          </tr></thead>
-          <tbody>
-            {recent.length === 0 && <tr><Td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)' }}>No orders yet</Td></tr>}
-            {recent.map(o => (
-              <tr key={o.id} onClick={() => router.push(`/admin/orders?orderId=${o.id}`)} style={{ cursor: 'pointer' }}>
-                <Td><MonoBadge>{o.id.slice(-8)}</MonoBadge></Td>
-                <Td style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{fmt(o.createdAt)}</Td>
-                <Td>{o.quantity ?? '—'}</Td>
-                <Td>₹{o.totalAmount || o.amount || 0}</Td>
-                <Td><IBadge cls={payBadge(o.paymentMethod)}>{o.paymentMethod || '—'}</IBadge></Td>
-                <Td><IBadge cls={statusBadge(o.status)}>{o.status}</IBadge></Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </>
-    );
-  };
-
-  const renderProfile = () => {
-    const userAddrs = addresses.filter(a => a.userId === selected?.id);
-    return (
-      <>
+        {/* ── Profile & Address merged into Overview ── */}
+        <SectionTitle>Profile & Contact</SectionTitle>
         <ProfileGrid>
           {[
             { label: 'Full Name', key: 'full_name' },
@@ -1232,8 +1295,7 @@ export default function UsersPage() {
             </ProfileField>
           ))}
         </ProfileGrid>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 15 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
           <BtnXS $variant="info" as="a" href={`tel:${(selected as any)?.phone || selected?.phoneNumber}`} style={{ flex: 1, textDecoration: 'none', justifyContent: 'center' }}>
             <FiPhoneCall size={14} /> Call Phone
           </BtnXS>
@@ -1241,45 +1303,115 @@ export default function UsersPage() {
             <FiMessageCircle size={14} /> WhatsApp
           </BtnXS>
         </div>
-        <SectionTitle>Delivery addresses</SectionTitle>
-        {userAddrs.length === 0 && <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13 }}>No addresses found.</div>}
-        {userAddrs.map((a, i) => (
-          <AddrCard key={a.id || i} $default={!!a.isDefault}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{a.address_type}</div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>{a.address_line}</div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-                {a.isDefault && <span style={{ background: 'var(--color-background-success)', color: 'var(--color-text-success)', borderRadius: 12, fontSize: 10, padding: '2px 8px' }}>Default</span>}
-                {a.plus_code && (
-                  <span title="Plus Code — Used for pinpoint delivery accuracy" style={{ background: '#E3F2FD', color: '#1565C0', borderRadius: 12, fontSize: 10, padding: '2px 8px', fontFamily: 'monospace', fontWeight: 600 }}>
-                    📍 {a.plus_code}
-                  </span>
-                )}
-                {!a.plus_code && (
-                  <span style={{ background: 'var(--color-background-warning)', color: 'var(--color-text-warning)', borderRadius: 12, fontSize: 10, padding: '2px 8px' }}>No Plus Code</span>
-                )}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-              {!a.isDefault && <BtnXS $variant="info" onClick={() => handleSetDefaultAddress(a.id!)}>Set default</BtnXS>}
-              <BtnXS $variant="info" onClick={() => setEditingAddress(a)} title="Edit Address"><FiEdit2 size={11} /></BtnXS>
-              <BtnXS $variant="danger" onClick={() => handleAddressDelete(a.id!)} title="Delete Address"><FiTrash2 size={11} /></BtnXS>
-            </div>
-          </AddrCard>
-        ))}
-        <BtnPrimary 
-           style={{ marginTop: 10, width: '100%', background: 'transparent', color: 'var(--color-text-secondary)', border: '1px dashed var(--color-border)', justifyContent: 'center' }}
-           onClick={() => { setEditingAddress(null); setIsAddrModalOpen(true); }}
-        >
-          <FiPlus /> Add new delivery address
-        </BtnPrimary>
-        <ActionBar>
+        <ActionBar style={{ marginBottom: 4 }}>
           <BtnPrimary onClick={handleProfileSave} disabled={saving}>{saving ? 'Saving…' : 'Save Profile'}</BtnPrimary>
           <BtnSec onClick={() => setEditFields({ full_name: (selected as any)?.full_name || '', email: selected?.email || '', phone: (selected as any)?.phone || '', alt_phone: (selected as any)?.alt_phone || '' })}>Discard</BtnSec>
         </ActionBar>
-      </>
+
+        {/* ── Delivery Addresses ── */}
+        {(() => {
+          const userAddrs = addresses.filter(a => a.userId === selected?.id);
+          return (
+            <>
+              <SectionTitle>Delivery Addresses</SectionTitle>
+              {userAddrs.length === 0 && <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13 }}>No addresses found.</div>}
+              {userAddrs.map((a, i) => (
+                <AddrCard key={a.id || i} $default={!!a.isDefault}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{a.address_type}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>{a.address_line}</div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+                      {a.isDefault && <span style={{ background: 'var(--color-background-success)', color: 'var(--color-text-success)', borderRadius: 12, fontSize: 10, padding: '2px 8px' }}>Default</span>}
+                      {a.plus_code && (
+                        <span title="Plus Code — Used for pinpoint delivery accuracy" style={{ background: '#E3F2FD', color: '#1565C0', borderRadius: 12, fontSize: 10, padding: '2px 8px', fontFamily: 'monospace', fontWeight: 600 }}>
+                          📍 {a.plus_code}
+                        </span>
+                      )}
+                      {!a.plus_code && (
+                        <span style={{ background: 'var(--color-background-warning)', color: 'var(--color-text-warning)', borderRadius: 12, fontSize: 10, padding: '2px 8px' }}>No Plus Code</span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                    {!a.isDefault && <BtnXS $variant="info" onClick={() => handleSetDefaultAddress(a.id!)}>Set default</BtnXS>}
+                    <BtnXS $variant="info" onClick={() => setEditingAddress(a)} title="Edit Address"><FiEdit2 size={11} /></BtnXS>
+                    <BtnXS $variant="danger" onClick={() => handleAddressDelete(a.id!)} title="Delete Address"><FiTrash2 size={11} /></BtnXS>
+                  </div>
+                </AddrCard>
+              ))}
+              <BtnPrimary
+                style={{ marginTop: 10, width: '100%', background: 'transparent', color: 'var(--color-text-secondary)', border: '1px dashed var(--color-border)', justifyContent: 'center' }}
+                onClick={() => { setEditingAddress(null); setIsAddrModalOpen(true); }}
+              >
+                <FiPlus /> Add new delivery address
+              </BtnPrimary>
+            </>
+          );
+        })()}
+
+        {/* ── Recent Orders ── */}
+        <SectionTitle>Recent orders</SectionTitle>
+        {recent.length === 0 && (
+          <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13, padding: '16px 0' }}>No orders yet.</div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {recent.map(o => {
+            const isDelivered = o.status === 'delivered' || o.status === 'completed';
+            const isCancelled = o.status === 'cancelled';
+            const accentColor = isDelivered ? 'var(--color-text-success)' : isCancelled ? '#EF4444' : 'var(--color-accent-cyan)';
+            const handover = (o.raw as any)?.handover;
+            const amtPaid = handover?.amountPaid ?? 0;
+            const total = o.totalAmount || o.amount || 0;
+            const due = Math.max(0, total - amtPaid);
+            return (
+              <div
+                key={o.id}
+                onClick={() => router.push(`/admin/orders?orderId=${o.id}`)}
+                style={{
+                  cursor: 'pointer',
+                  background: 'var(--color-background-secondary)',
+                  border: `1px solid var(--color-border-primary)`,
+                  borderLeft: `3px solid ${accentColor}`,
+                  borderRadius: 4,
+                  padding: '12px 16px',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr auto',
+                  gap: 8,
+                  transition: 'transform 0.15s, box-shadow 0.15s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = ''; (e.currentTarget as HTMLDivElement).style.boxShadow = ''; }}
+              >
+                <div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                    <MonoBadge style={{ color: 'var(--color-text-secondary)', fontSize: 10 }}>#{o.raw?.orderNumber || o.id.slice(-8)}</MonoBadge>
+                    <IBadge cls={statusBadge(o.status)}>{o.status}</IBadge>
+                    <IBadge cls={payBadge(o.paymentMethod)}>{o.paymentMethod || '—'}</IBadge>
+                    {handover && <span style={{ fontSize: 9, color: 'var(--color-accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>✓ Scanned</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, fontSize: 11, color: 'var(--color-text-secondary)' }}>
+                    <span>🗓 {fmt(o.createdAt)}</span>
+                    <span>📦 {o.quantity ?? 0} jar{(o.quantity ?? 0) !== 1 ? 's' : ''}</span>
+                    {handover?.deliveredJars != null && <span style={{ color: 'var(--color-text-success)' }}>⬇ {handover.deliveredJars} delivered</span>}
+                    {handover?.collectedJars != null && <span style={{ color: '#EAB308' }}>⬆ {handover.collectedJars} collected</span>}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, fontFamily: 'Fira Code, monospace', color: 'var(--foreground)' }}>₹{total}</div>
+                  {due > 0
+                    ? <div style={{ fontSize: 10, color: '#EF4444', fontWeight: 700, marginTop: 2 }}>₹{due} due</div>
+                    : isDelivered && <div style={{ fontSize: 10, color: 'var(--color-text-success)', fontWeight: 700, marginTop: 2 }}>Paid ✓</div>
+                  }
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     );
   };
+
+  const renderProfile = () => renderOverview();
 
   const renderOrders = () => {
     const del = filteredOrders.filter(o => o.status === 'delivered' || o.status === 'completed').length;
@@ -1304,6 +1436,12 @@ export default function UsersPage() {
           <FSel value={fSlot} onChange={e => setFSlot(e.target.value)}>
             <option value="">All slots</option>
             <option value="1">Slot 1</option><option value="2">Slot 2</option><option value="3">Slot 3</option>
+          </FSel>
+          <FSel value={fSort} onChange={e => setFSort(e.target.value)}>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="delivery_newest">Delivery date (newest)</option>
+            <option value="delivery_oldest">Delivery date (oldest)</option>
           </FSel>
           <FInput placeholder="Order ID…" value={fSearch} onChange={e => setFSearch(e.target.value)} />
         </FilterBar>
@@ -1338,52 +1476,88 @@ export default function UsersPage() {
                     </ExpandBtn>
                   </Td>
                 </tr>
-                {expandedOrder === o.id && (
-                  <tr>
-                    <Td colSpan={9} style={{ padding: '0 10px 10px' }}>
-                      <OrderDetail>
-                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Order breakdown — {o.raw?.orderNumber || o.id}</div>
-                        <DetailGrid>
-                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Delivery Address</div><div style={{ fontSize: 11 }}>{o.raw?.deliveryAddress?.fullAddress || o.address || '—'}</div></div>
-                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Delivery Date</div><div style={{ fontSize: 12, fontWeight: 500 }}>{o.raw?.deliveryDate || '—'}</div></div>
-                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Delivery Slot</div><div style={{ fontSize: 12, fontWeight: 500 }}>{o.raw?.deliverySlot || '—'}</div></div>
-                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Payment Status</div><div style={{ fontSize: 12, fontWeight: 500 }}>{o.raw?.paymentStatus || '—'}</div></div>
-                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Fast Delivery</div><div style={{ fontSize: 12, fontWeight: 500 }}>{o.raw?.isPriority ? '₹7 fee' : 'None'}</div></div>
-                          <div>
-                            <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Items</div>
-                            <div style={{ fontSize: 12, fontWeight: 500 }}>
-                              {o.items && o.items.length > 0 ? (
-                                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                                  {o.items.map((item: any, idx: number) => (
-                                    <li key={idx}>{item.name} × {item.quantity || 1} = ₹{((item.price || 0) * (item.quantity || 1)).toFixed(2)}</li>
-                                  ))}
-                                </ul>
-                              ) : (
-                                `${o.quantity} jar(s) × ₹37`
-                              )}
-                            </div>
-                          </div>
-                          <div><div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 2 }}>Total charged</div><div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-info)' }}>₹{o.raw?.total || o.amount}</div></div>
-                        </DetailGrid>
+                {expandedOrder === o.id && (() => {
+                    const h = (o as any).handover;
+                    const totalAmt = o.raw?.total || o.totalAmount || o.amount || 0;
+                    const amountPaid = h?.amountPaid ?? totalAmt;
+                    const due = totalAmt - amountPaid;
+                    const fmtTs = (t: any) => {
+                      if (!t) return '—';
+                      if (typeof t.toDate === 'function') return t.toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+                      if (t instanceof Date) return t.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+                      return new Date(t).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+                    };
+                    return (
+                      <tr>
+                        <Td colSpan={9} style={{ padding: '0 10px 14px' }}>
+                          <OrderDetail>
+                            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 12, color: 'var(--color-text-secondary)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Order Record — {o.raw?.orderNumber || o.id.slice(-8).toUpperCase()}</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
 
-                        <div style={{ marginTop: '12px', borderTop: '0.5px solid var(--color-border-tertiary)', paddingTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <button 
-                            onClick={() => {
-                              const win = window.open('', '_blank');
-                              win?.document.write(`<pre>${JSON.stringify(o.raw || o, null, 2)}</pre>`);
-                            }}
-                            style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '10px', cursor: 'pointer', textDecoration: 'underline' }}
-                          >
-                            View raw JSON
-                          </button>
-                          <BtnXS $variant="info" onClick={() => router.push(`/admin/orders?orderId=${o.id}`)} style={{ padding: '6px 12px', gap: '6px' }}>
-                            <FiPackage size={14} /> View in Orders tab
-                          </BtnXS>
-                        </div>
-                      </OrderDetail>
-                    </Td>
-                  </tr>
-                )}
+                              {/* ── DELIVERY RECORD ── */}
+                              <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px 14px', border: '1px solid var(--color-border-tertiary)' }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: '#10B981', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10 }}>📦 Delivery Record</div>
+                                {[['Placed on', fmtTs(o.createdAt)], ['Delivered on', fmtTs(h?.completedAt)], ['Slot', o.raw?.deliverySlot || o.slot || '—'], ['Address', o.raw?.deliveryAddress?.fullAddress || o.address || '—'], ['Fast delivery', (o.raw?.isPriority || o.fastDelivery) ? '₹7 fee' : 'No'], ['Staff notes', h?.notes || '—']].map(([label, val]) => (
+                                  <div key={label as string} style={{ marginBottom: 8 }}>
+                                    <div style={{ fontSize: 9, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
+                                    <div style={{ fontSize: 11, fontWeight: 500, wordBreak: 'break-word' }}>{val}</div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* ── JAR SCAN RECORD ── */}
+                              <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px 14px', border: '1px solid var(--color-border-tertiary)' }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: '#F59E0B', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10 }}>🏺 Jar Scan Record</div>
+                                <div style={{ marginBottom: 8 }}>
+                                  <div style={{ fontSize: 9, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 4 }}>Delivered ({h?.deliveredJars ?? o.quantity ?? '—'})</div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                    {h?.deliveredJarIds?.length > 0
+                                      ? h.deliveredJarIds.map((id: string) => <span key={id} style={{ background: 'rgba(16,185,129,0.12)', color: '#10B981', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 6, padding: '2px 7px', fontSize: 10, fontFamily: 'DM Mono, monospace', fontWeight: 600 }}>{id}</span>)
+                                      : <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)' }}>{h?.deliveredJars ?? o.quantity ?? 0} jar(s) — IDs not scanned</span>}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 9, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 4 }}>Collected / Returned ({h?.collectedJars ?? 0})</div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                    {h?.collectedJarIds?.length > 0
+                                      ? h.collectedJarIds.map((id: string) => <span key={id} style={{ background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 6, padding: '2px 7px', fontSize: 10, fontFamily: 'DM Mono, monospace', fontWeight: 600 }}>{id}</span>)
+                                      : <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)' }}>{h ? `${h.collectedJars ?? 0} jar(s) — IDs not scanned` : 'No return data'}</span>}
+                                  </div>
+                                </div>
+                                {h && <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--color-border-tertiary)', fontSize: 11, fontWeight: 600 }}>Net jar change: <span style={{ color: (h.netChange ?? 0) >= 0 ? '#10B981' : '#EF4444' }}>{(h.netChange ?? 0) >= 0 ? '+' : ''}{h.netChange ?? 0}</span></div>}
+                              </div>
+
+                              {/* ── PAYMENT RECORD ── */}
+                              <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px 14px', border: '1px solid var(--color-border-tertiary)' }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: '#3B82F6', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10 }}>💳 Payment Record</div>
+                                {[['Order amount', `₹${totalAmt}`], ['Amount paid', h ? `₹${amountPaid}` : '—'], ['Payment method', o.paymentMethod || '—'], ['Payment status', o.raw?.paymentStatus || (o.status === 'delivered' || o.status === 'completed' ? 'Completed' : '—')], ['Wallet balance (now)', `₹${selected?.wallet_balance ?? 0}`]].map(([label, val]) => (
+                                  <div key={label as string} style={{ marginBottom: 8 }}>
+                                    <div style={{ fontSize: 9, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
+                                    <div style={{ fontSize: 11, fontWeight: 500 }}>{val}</div>
+                                  </div>
+                                ))}
+                                <div style={{ marginTop: 4, paddingTop: 8, borderTop: '0.5px solid var(--color-border-tertiary)' }}>
+                                  <div style={{ fontSize: 9, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: 2 }}>Due amount</div>
+                                  {!h ? (
+                                    <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>No handover data</div>
+                                  ) : due <= 0 ? (
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: '#10B981' }}>✔ Paid in Full</div>
+                                  ) : (
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: '#EF4444' }}>⚠️ ₹{due} due</div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div style={{ marginTop: 12, borderTop: '0.5px solid var(--color-border-tertiary)', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <button onClick={() => { const win = window.open('', '_blank'); win?.document.write(`<pre>${JSON.stringify(o.raw || o, null, 2)}</pre>`); }} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '10px', cursor: 'pointer', textDecoration: 'underline' }}>View raw JSON</button>
+                              <BtnXS $variant="info" onClick={() => router.push(`/admin/orders?orderId=${o.id}`)} style={{ padding: '6px 12px', gap: '6px' }}><FiPackage size={14} /> View in Orders tab</BtnXS>
+                            </div>
+                          </OrderDetail>
+                        </Td>
+                      </tr>
+                    );
+                  })()}
               </React.Fragment>
             ))}
           </tbody>
@@ -1473,9 +1647,52 @@ export default function UsersPage() {
     <>
       <Metrics $cols={3}>
         <Metric><ML>Wallet balance</ML><MV $color="var(--color-text-success)">₹{selected?.wallet_balance ?? 0}</MV></Metric>
-        <Metric><ML>Jars with customer</ML><MV>{selected?.jars_occupied ?? 0}</MV></Metric>
-        <Metric><ML>Jar deposit</ML><MV $color="var(--color-text-warning)">₹200</MV></Metric>
+        <Metric><ML>Jars with customer</ML><MV>{userJars.length}</MV></Metric>
+        <Metric>
+          <ML>{selected?.customer_status === 'PRO_CUSTOMER' ? 'Pro Plan' : 'Jar deposit'}</ML>
+          <MV $color="var(--color-text-warning)">
+            {selected?.customer_status === 'VISITOR' || selected?.customer_status === 'FREE_CUSTOMER' ? '₹0' :
+             selected?.customer_status === 'PRO_CUSTOMER' ? `₹${selected.pro_plan_tier ?? 15} / mo` :
+             `₹${selected?.jar_deposit_amount ?? 200}`}
+          </MV>
+        </Metric>
       </Metrics>
+      <SectionTitle>Held Jars</SectionTitle>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '14px' }}>
+        {userJars.length > 0 ? (
+          userJars.map(jar => (
+            <div key={jar.id} style={{
+              background: 'rgba(16, 185, 129, 0.1)',
+              border: '1px solid rgba(16, 185, 129, 0.2)',
+              color: '#10B981',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontFamily: 'DM Mono, monospace',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              {jar.id}
+              <button
+                onClick={(e) => { e.stopPropagation(); handleReturnJar(jar.id); }}
+                disabled={isProcessingJar}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'inherit', padding: '0', display: 'flex', alignItems: 'center',
+                  opacity: isProcessingJar ? 0.5 : 1
+                }}
+                title="Unlock/Return Jar"
+              >
+                <FiXCircle size={14} />
+              </button>
+            </div>
+          ))
+        ) : (
+          <div style={{ color: 'var(--color-text-tertiary)', fontSize: '12px' }}>No jars currently held.</div>
+        )}
+      </div>
       <SectionTitle>Manual wallet adjustment</SectionTitle>
       <WalletAdj>
         <AdjRow>
@@ -1491,12 +1708,49 @@ export default function UsersPage() {
       <SectionTitle>Jar management</SectionTitle>
       <WalletAdj>
         <AdjRow>
-          <span>Jars with customer</span>
-          <AdjInput type="number" style={{ width: 70 }} value={jarCount} onChange={e => setJarCount(e.target.value)} />
-          <span>Reason</span>
-          <AdjInput placeholder="e.g. Manual correction" style={{ flex: 1, minWidth: 120 }} value={jarReason} onChange={e => setJarReason(e.target.value)} />
+          <span>Assign Jar</span>
+          <AdjInput 
+            placeholder="Scan or enter Jar ID (e.g. 0312)" 
+            style={{ flex: 1, minWidth: 120 }} 
+            value={newJarId} 
+            onChange={e => setNewJarId(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAssignJar()}
+          />
         </AdjRow>
-        <BtnPrimary onClick={handleJarCorrection} disabled={saving}>Save jar correction &amp; audit log</BtnPrimary>
+        <BtnPrimary onClick={handleAssignJar} disabled={isProcessingJar || !newJarId.trim()}>Lock Jar to Customer</BtnPrimary>
+      </WalletAdj>
+      <SectionTitle>Financial settings</SectionTitle>
+      <WalletAdj>
+        {selected?.customer_status === 'DEPOSIT_CUSTOMER' ? (
+          <AdjRow>
+            <span>Deposit Amount (₹)</span>
+            <AdjInput 
+              type="number" 
+              style={{ width: 100 }} 
+              value={jarDepositAmount} 
+              onChange={e => setJarDepositAmount(Number(e.target.value))}
+            />
+          </AdjRow>
+        ) : selected?.customer_status === 'PRO_CUSTOMER' ? (
+          <AdjRow>
+            <span>Pro Tier (₹/mo)</span>
+            <AdjSelect 
+              value={proPlanTier} 
+              onChange={e => setProPlanTier(Number(e.target.value))}
+            >
+              <option value={15}>Lite (₹15)</option>
+              <option value={35}>Standard (₹35)</option>
+              <option value={55}>Premium (₹55)</option>
+            </AdjSelect>
+          </AdjRow>
+        ) : (
+          <div style={{ color: 'var(--color-text-tertiary)', fontSize: '12px', padding: '10px 0' }}>
+            {selected?.customer_status === 'FREE_CUSTOMER' ? 'Legacy (Free) users do not pay a deposit or monthly fee.' : 'Visitors do not have financial obligations.'}
+          </div>
+        )}
+        {(selected?.customer_status === 'DEPOSIT_CUSTOMER' || selected?.customer_status === 'PRO_CUSTOMER') && (
+          <BtnPrimary onClick={handleFinancialSave} disabled={saving}>Save Financial Settings</BtnPrimary>
+        )}
       </WalletAdj>
     </>
   );
@@ -1838,14 +2092,14 @@ export default function UsersPage() {
   };
 
   const handleExportToExcel = () => {
-    if (users.length === 0) {
-      showToast('No customer data to export');
+    if (filteredUsers.length === 0) {
+      showToast('No data to export');
       return;
     }
 
     try {
       // Flatten the data for Excel
-      const dataToExport = users.map(u => ({
+      const dataToExport = filteredUsers.map(u => ({
         'Customer ID': u.customerId || u.id,
         'Full Name': dName(u),
         'Email': u.email || '—',
@@ -1884,13 +2138,17 @@ export default function UsersPage() {
       ];
       ws['!cols'] = colWidths;
 
+      // Determine label based on filter
+      const isCustomersOnly = navFilter === 'all_customers';
+      const label = isCustomersOnly ? 'Customers' : 'Users';
+
       // Create Workbook
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Customers');
+      XLSX.utils.book_append_sheet(wb, ws, label);
 
       // Generate Filename with date
       const dateStr = new Date().toISOString().split('T')[0];
-      XLSX.writeFile(wb, `Hydrant_Customers_${dateStr}.xlsx`);
+      XLSX.writeFile(wb, `Hydrant_${label}_${dateStr}.xlsx`);
       
       showToast('Excel export complete');
     } catch (err) {

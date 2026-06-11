@@ -346,24 +346,32 @@ export default function SupportTicketsPage() {
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
-    const unsub = subscribeToCollection('contact_messages', (snapshot: any) => {
-      const msgs: SupportMessage[] = snapshot.docs.map((d: any) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          userId: data.userId || null,
-          name: data.name || 'Unknown',
-          phone: data.phone || '',
-          email: data.email || '',
-          subject: data.subject || 'No Subject',
-          message: data.message || '',
-          status: data.status || 'unread',
-          createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-        };
-      });
-      setMessages(msgs);
-      setLoading(false);
-    });
+    const unsub = subscribeToCollection(
+      'contact_messages',
+      (snapshot: any) => {
+        const msgs: SupportMessage[] = snapshot.docs.map((d: any) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            userId: data.userId || null,
+            name: data.name || 'Unknown',
+            phone: data.phone || '',
+            email: data.email || '',
+            subject: data.subject || 'No Subject',
+            message: data.message || '',
+            status: data.status || 'unread',
+            createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+          };
+        });
+        setMessages(msgs);
+        setLoading(false);
+      },
+      [],
+      (error) => {
+        console.error('❌ Failed to subscribe to contact_messages:', error);
+        setLoading(false);
+      }
+    );
     return () => unsub();
   }, []);
 

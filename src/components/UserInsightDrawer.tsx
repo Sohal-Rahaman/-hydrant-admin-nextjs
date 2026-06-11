@@ -91,7 +91,9 @@ export default function UserInsightDrawer({ isOpen, onClose, user }: UserInsight
     try {
       await updateDocument('users', user.id, {
         wallet_balance: Number(walletBalance),
+        walletBalance: Number(walletBalance),
         jars_occupied: Number(jarsOccupied),
+        jarHold: Number(jarsOccupied),
         alt_phone: altPhone,
         dob: dob,
         gender: gender,

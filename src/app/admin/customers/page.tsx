@@ -36,9 +36,14 @@ interface UserData {
   phone?: string;
   walletBalance?: number;
   wallet_balance?: number;
+  jars_occupied?: number;
   deliveryAddresses?: any[];
   isPremium?: boolean;
   createdAt: any;
+  customer_status?: string;
+  jar_deposit_amount?: number;
+  pro_plan_tier?: number;
+  customerId?: string;
 }
 
 interface WalletTransaction {
@@ -48,6 +53,18 @@ interface WalletTransaction {
   description: string;
   createdAt: any;
   status: string;
+}
+
+interface OrderData {
+  id: string;
+  totalAmount?: number;
+  total?: number;
+  status: string;
+  createdAt: any;
+}
+
+interface JarData {
+  id: string;
 }
 
 interface LeadData {
@@ -286,8 +303,14 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
+  const [orders, setOrders] = useState<OrderData[]>([]);
+  const [jars, setJars] = useState<JarData[]>([]);
+  const [dataLoading, setDataLoading] = useState(false);
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
   const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [jarDepositAmount, setJarDepositAmount] = useState<number>(200);
+  const [proPlanTier, setProPlanTier] = useState<number>(15);
+  const [savingFinancial, setSavingFinancial] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -320,17 +343,37 @@ export default function CustomersPage() {
   useEffect(() => {
     if (!selectedUser) {
       setTransactions([]);
+      setOrders([]);
+      setJars([]);
+      setJarDepositAmount(200);
+      setProPlanTier(15);
       return;
     }
 
+    setJarDepositAmount(selectedUser.jar_deposit_amount ?? 200);
+    setProPlanTier(selectedUser.pro_plan_tier ?? 15);
+
     setTransactionsLoading(true);
-    const q = query(
+    setDataLoading(true);
+    
+    const qTxns = query(
       collection(db, 'wallet_transactions'),
       where('userId', '==', selectedUser.id),
       orderBy('createdAt', 'desc')
     );
 
-    const unsubTxns = onSnapshot(q, (snapshot) => {
+    const qOrders = query(
+      collection(db, 'orders'),
+      where('userId', '==', selectedUser.id),
+      orderBy('createdAt', 'desc')
+    );
+
+    const qJars = query(
+      collection(db, 'jars'),
+      where('currentOwnerId', 'in', [selectedUser.id, (selectedUser as any).customerId].filter(Boolean))
+    );
+
+    const unsubTxns = onSnapshot(qTxns, (snapshot) => {
       const txns = snapshot.docs.map(doc => ({ 
         id: doc.id, 
         ...doc.data() 
@@ -339,7 +382,28 @@ export default function CustomersPage() {
       setTransactionsLoading(false);
     });
 
-    return () => unsubTxns();
+    const unsubOrders = onSnapshot(qOrders, (snapshot) => {
+      const ords = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      })) as OrderData[];
+      setOrders(ords);
+    });
+
+    const unsubJars = onSnapshot(qJars, (snapshot) => {
+      const jrs = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      })) as JarData[];
+      setJars(jrs);
+      setDataLoading(false);
+    });
+
+    return () => {
+      unsubTxns();
+      unsubOrders();
+      unsubJars();
+    };
   }, [selectedUser?.id]);
 
   const filteredUsers = users.filter(u => 
@@ -400,6 +464,25 @@ export default function CustomersPage() {
     }
   };
 
+  const handleFinancialSave = async () => {
+    if (!selectedUser) return;
+    setSavingFinancial(true);
+    try {
+      const data: any = {};
+      if (selectedUser.customer_status === 'DEPOSIT_CUSTOMER') {
+        data.jar_deposit_amount = jarDepositAmount;
+      } else if (selectedUser.customer_status === 'PRO_CUSTOMER') {
+        data.pro_plan_tier = proPlanTier;
+      }
+      await updateDoc(doc(db, 'users', selectedUser.id), data);
+      alert('Financial settings updated.');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to update financial settings');
+    }
+    setSavingFinancial(false);
+  };
+
   const conversionRate = leads.length > 0 
     ? ((leads.filter(l => l.converted).length / leads.length) * 100).toFixed(1)
     : 0;
@@ -458,7 +541,12 @@ export default function CustomersPage() {
                       <div style={{ fontSize: '12px', color: '#666' }}>{user.phone || user.id.slice(0, 12)}</div>
                     </div>
                   </div>
-                  <WalletPill>₹{user.walletBalance || 0}</WalletPill>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <WalletPill style={{ color: '#F59E0B', background: 'rgba(245, 158, 11, 0.1)', borderColor: 'rgba(245, 158, 11, 0.2)' }}>
+                      {user.jars_occupied || 0} Jars
+                    </WalletPill>
+                    <WalletPill>₹{user.walletBalance || 0}</WalletPill>
+                  </div>
                 </UserItem>
               ))}
             </div>
@@ -488,6 +576,20 @@ export default function CustomersPage() {
                 </InfoRow>
 
                 <InfoRow>
+                  <FiCreditCard size={20} />
+                  <div>
+                    <div className="label">{selectedUser.customer_status === 'PRO_CUSTOMER' ? 'Pro Plan' : 'Jar Deposit'}</div>
+                    <div className="value" style={{ color: '#F59E0B' }}>
+                      {!selectedUser.customer_status || selectedUser.customer_status === 'VISITOR' || selectedUser.customer_status === 'FREE_CUSTOMER'
+                        ? '₹0'
+                        : selectedUser.customer_status === 'PRO_CUSTOMER'
+                        ? `₹${selectedUser.pro_plan_tier ?? 15} / mo`
+                        : `₹${selectedUser.jar_deposit_amount ?? 200}`}
+                    </div>
+                  </div>
+                </InfoRow>
+
+                <InfoRow>
                   <FiMapPin size={20} />
                   <div style={{ flex: 1 }}>
                     <div className="label">Primary HQ</div>
@@ -496,6 +598,65 @@ export default function CustomersPage() {
                 </InfoRow>
 
                 <div style={{ marginTop: '32px', borderTop: '1px solid #2e2e2e', paddingTop: '32px' }}>
+                  
+                  {/* JARS SECTION */}
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#666', textTransform: 'uppercase', marginBottom: '12px' }}>Held Jars</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '32px' }}>
+                    {dataLoading ? (
+                      <div style={{ color: '#444', fontSize: '12px' }}>Loading jars...</div>
+                    ) : jars.length > 0 ? (
+                      jars.map(jar => (
+                        <div key={jar.id} style={{
+                          background: 'rgba(16, 185, 129, 0.1)',
+                          border: '1px solid rgba(16, 185, 129, 0.2)',
+                          color: '#10B981',
+                          padding: '6px 12px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontFamily: 'DM Mono',
+                          fontWeight: 600
+                        }}>
+                          {jar.id}
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ color: '#444', fontSize: '12px' }}>No jars held.</div>
+                    )}
+                  </div>
+
+                  {/* ORDERS SECTION */}
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#666', textTransform: 'uppercase', marginBottom: '20px' }}>Recent Orders</div>
+                  {dataLoading ? (
+                    <div style={{ padding: '20px', textAlign: 'center', color: '#444', fontSize: '12px' }}>Loading orders...</div>
+                  ) : orders.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto', marginBottom: '32px' }}>
+                      {orders.map(order => (
+                        <div key={order.id} style={{ 
+                          background: '#121212', 
+                          padding: '12px', 
+                          borderRadius: '12px', 
+                          border: '1px solid #222',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: 600, fontFamily: 'DM Mono' }}>#{order.id.slice(0, 8).toUpperCase()}</div>
+                            <div style={{ fontSize: '10px', color: '#555' }}>
+                              {order.createdAt?.toDate?.() ? order.createdAt.toDate().toLocaleString() : 'Recent'} • {order.status}
+                            </div>
+                          </div>
+                          <div style={{ fontWeight: 700, color: '#f0f0f0', fontSize: '14px' }}>
+                            ₹{order.totalAmount ?? order.total ?? 0}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '20px', textAlign: 'center', color: '#444', fontSize: '12px', marginBottom: '32px' }}>No orders found.</div>
+                  )}
+
+                  {/* TRANSACTIONS SECTION */}
                   <div style={{ fontSize: '11px', fontWeight: 700, color: '#666', textTransform: 'uppercase', marginBottom: '20px' }}>Recent Transactions</div>
                   
                   {transactionsLoading ? (
@@ -515,7 +676,7 @@ export default function CustomersPage() {
                           <div>
                             <div style={{ fontSize: '12px', fontWeight: 600 }}>{txn.description}</div>
                             <div style={{ fontSize: '10px', color: '#555' }}>
-                              {txn.createdAt?.toDate?.() ? txn.createdAt.toDate().toLocaleDateString() : 'Recent'} • {txn.type}
+                              {txn.createdAt?.toDate?.() ? txn.createdAt.toDate().toLocaleString() : 'Recent'} • {txn.type}
                             </div>
                           </div>
                           <div style={{ 
@@ -559,6 +720,40 @@ export default function CustomersPage() {
                   <ActionButton variant="danger" onClick={handleDeleteUser} style={{ marginTop: '12px' }}>
                     <FiAlertCircle /> Permanent Delete
                   </ActionButton>
+
+                  {/* FINANCIAL SETTINGS */}
+                  {(selectedUser.customer_status === 'DEPOSIT_CUSTOMER' || selectedUser.customer_status === 'PRO_CUSTOMER') && (
+                    <div style={{ borderTop: '1px solid #2e2e2e', paddingTop: '24px', marginTop: '24px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#666', textTransform: 'uppercase', marginBottom: '16px' }}>Financial Settings</div>
+                      {selectedUser.customer_status === 'DEPOSIT_CUSTOMER' ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                          <span style={{ fontSize: '13px', color: '#999', whiteSpace: 'nowrap' }}>Deposit Amount (₹)</span>
+                          <input
+                            type="number"
+                            value={jarDepositAmount}
+                            onChange={e => setJarDepositAmount(Number(e.target.value))}
+                            style={{ background: '#222', border: '1px solid #2e2e2e', borderRadius: '8px', color: '#f0f0f0', padding: '8px 12px', width: '100px', fontSize: '13px' }}
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                          <span style={{ fontSize: '13px', color: '#999', whiteSpace: 'nowrap' }}>Pro Tier (₹/mo)</span>
+                          <select
+                            value={proPlanTier}
+                            onChange={e => setProPlanTier(Number(e.target.value))}
+                            style={{ background: '#222', border: '1px solid #2e2e2e', borderRadius: '8px', color: '#f0f0f0', padding: '8px 12px', fontSize: '13px' }}
+                          >
+                            <option value={15}>Lite (₹15)</option>
+                            <option value={35}>Standard (₹35)</option>
+                            <option value={55}>Premium (₹55)</option>
+                          </select>
+                        </div>
+                      )}
+                      <ActionButton variant="primary" onClick={handleFinancialSave} disabled={savingFinancial}>
+                        <FiCheckCircle /> {savingFinancial ? 'Saving...' : 'Save Financial Settings'}
+                      </ActionButton>
+                    </div>
+                  )}
                 </div>
               </DetailCard>
             ) : (

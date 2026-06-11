@@ -211,6 +211,64 @@ export interface StaffMember {
   addedBy?: string;
 }
 
+export interface AdminSession {
+  id: string;
+  uid: string;
+  name: string;
+  phone: string;
+  role: string | null;
+  userAgent: string;
+  os: string;
+  browser: string;
+  deviceId?: string;
+  createdAt: any;
+  expiresAt: any;
+  lastActive: any;
+  status: 'active' | 'revoked' | 'expired';
+}
+
+export const revokeAdminSession = async (sessionId: string) => {
+  try {
+    await updateDoc(doc(db, 'admin_sessions', sessionId), {
+      status: 'revoked'
+    });
+    return true;
+  } catch (error) {
+    console.error('Error revoking session:', error);
+    return false;
+  }
+};
+
+export const revokeAllUserSessions = async (uid: string) => {
+  try {
+    const q = query(collection(db, 'admin_sessions'), where('uid', '==', uid), where('status', '==', 'active'));
+    const snapshot = await getDocs(q);
+    const batchPromises = snapshot.docs.map(docSnap => 
+      updateDoc(doc(db, 'admin_sessions', docSnap.id), { status: 'revoked' })
+    );
+    await Promise.all(batchPromises);
+    return true;
+  } catch (error) {
+    console.error('Error revoking all user sessions:', error);
+    return false;
+  }
+};
+
+export const revokeAllActiveSessionsGlobally = async () => {
+  try {
+    const q = query(collection(db, 'admin_sessions'), where('status', '==', 'active'));
+    const snapshot = await getDocs(q);
+    const batchPromises = snapshot.docs.map(docSnap => 
+      updateDoc(doc(db, 'admin_sessions', docSnap.id), { status: 'revoked' })
+    );
+    await Promise.all(batchPromises);
+    return true;
+  } catch (error) {
+    console.error('Error revoking all global sessions:', error);
+    return false;
+  }
+};
+
 export interface Jar {
   id: string; // e.g. HYD-JAR-0001
   currentOwnerId: string | null;

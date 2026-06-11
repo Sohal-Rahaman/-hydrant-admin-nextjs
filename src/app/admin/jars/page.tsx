@@ -19,7 +19,8 @@ import {
   FiLogOut,
   FiLogIn,
   FiPlus,
-  FiX
+  FiX,
+  FiBriefcase
 } from 'react-icons/fi';
 import { useAuth } from '@/context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -381,7 +382,9 @@ export default function JarsInventoryPage() {
   const getOwnerName = (jar: Jar) => {
     if (!jar.currentOwnerId) return null;
     const u = users[jar.currentOwnerId];
-    return u ? u.displayName : null;
+    if (u) return u.displayName;
+    if (jar.currentOwnerId.includes('[ b2b ]')) return jar.currentOwnerId;
+    return null;
   };
 
   const getPhone = (jar: Jar) => {
@@ -640,6 +643,14 @@ export default function JarsInventoryPage() {
                               <div style={{ fontSize: '11px', color: '#94a3b8' }}>
                                 {owner.displayPhone} &bull; <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{owner.customerId || 'ID Pending'}</span>
                               </div>
+                            </div>
+                          </div>
+                        ) : jar.currentOwnerId?.includes('[ b2b ]') ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <FiBriefcase color="#3b82f6" size={14} />
+                            <div>
+                              <div style={{ fontWeight: '600', color: '#1e293b' }}>{jar.currentOwnerId}</div>
+                              <div style={{ fontSize: '11px', color: '#3b82f6' }}>Corporate Account &bull; B2B</div>
                             </div>
                           </div>
                         ) : (

@@ -2,12 +2,13 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
-import { collection, query, getDocs, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, query, getDocs, addDoc, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getClientById, recordLedgerEntry } from '@/lib/b2bService';
 import { logActivity } from '@/lib/activityLogger';
 import { useAuth } from '@/context/AuthContext';
-import { FiUserPlus, FiUsers, FiSearch, FiCheck, FiX, FiShoppingCart } from 'react-icons/fi';
-import { useRouter } from 'next/navigation';
+import { FiUserPlus, FiUsers, FiSearch, FiCheck, FiX, FiShoppingCart, FiBriefcase } from 'react-icons/fi';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 const PageContainer = styled.div`
   padding: 24px;
@@ -233,8 +234,10 @@ const SubmitButton = styled.button`
 export default function CreateOrderPage() {
   const { userData } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialClientId = searchParams.get('clientId');
 
-  const [mode, setMode] = useState<'existing' | 'new'>('existing');
+  const [mode, setMode] = useState<'existing' | 'new' | 'b2b'>(initialClientId ? 'b2b' : 'existing');
   
   // Existing Customer State
   const [users, setUsers] = useState<any[]>([]);
@@ -254,9 +257,32 @@ export default function CreateOrderPage() {
   const [quantity, setQuantity] = useState('1');
   const [pricePerJar, setPricePerJar] = useState('37');
   const [isFastDelivery, setIsFastDelivery] = useState(false);
+  const [notes, setNotes] = useState('');
   
   const [loading, setLoading] = useState(false);
   const [fetchingUsers, setFetchingUsers] = useState(false);
+  const [b2bClient, setB2BClient] = useState<any>(null);
+
+  useEffect(() => {
+    if (initialClientId && mode === 'b2b') {
+      fetchB2BClient(initialClientId);
+    }
+  }, [initialClientId, mode]);
+
+  const fetchB2BClient = async (cid: string) => {
+    setLoading(true);
+    try {
+      const client = await getClientById(cid);
+      if (client) {
+        setB2BClient(client);
+        setPricePerJar(String(client.contractTerms?.pricePerJar || 37));
+      }
+    } catch (err) {
+      console.error('Error fetching B2B client:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -306,7 +332,23 @@ export default function CreateOrderPage() {
       let customerId = selectedCustomer?.id;
       let customerData = selectedCustomer;
 
-      if (mode === 'new') {
+      if (mode === 'b2b') {
+        if (!b2bClient) {
+          alert('B2B Client not found');
+          setLoading(false);
+          return;
+        }
+        customerId = b2bClient.id;
+        customerData = {
+          id: b2bClient.id,
+          name: b2bClient.companyName,
+          phone: b2bClient.contactPerson?.phone,
+          address: b2bClient.address,
+          pincode: b2bClient.pincode,
+          email: b2bClient.contactPerson?.email,
+          isB2B: true
+        };
+      } else if (mode === 'new') {
         if (!name.trim() || !phone.trim() || !address.trim()) {
           alert('Please enter customer name, phone, and address');
           setLoading(false);
@@ -365,6 +407,7 @@ export default function CreateOrderPage() {
         customerName: customerData.name || '',
         customerPhone: customerData.phone || '',
         customerEmail: customerData.email || '',
+        isB2B: mode === 'b2b',
         items: [{
           id: '1',
           name: '20L Water Jar',
@@ -375,7 +418,7 @@ export default function CreateOrderPage() {
         isFastDelivery: isFastDelivery,
         deliveryAddress: {
           address_line: customerData.address || address,
-          address_type: 'Home',
+          address_type: mode === 'b2b' ? 'Work' : 'Home',
           city: '',
           state: '',
           country: '',
@@ -387,20 +430,34 @@ export default function CreateOrderPage() {
         createdAt: Timestamp.fromDate(new Date()),
         orderDateStr: new Date().toLocaleDateString('en-IN'),
         createdBy: userData?.id || 'admin',
-        createdByName: userData?.displayName || 'Admin'
+        createdByName: userData?.displayName || 'Admin',
+        notes: notes
       });
+
+      // B2B Ledger Record
+      if (mode === 'b2b') {
+        await recordLedgerEntry({
+          clientId: customerId,
+          type: 'jar_delivery',
+          amount: totalAmount,
+          jarCount: qty,
+          referenceId: orderRef.id,
+          description: `Bulk Order Created: ${qty} jars @ ₹${price}`,
+          recordedBy: userData?.id || 'admin'
+        });
+      }
 
       await logActivity({
         actorId: userData?.id || 'unknown',
         actorName: userData?.displayName || 'Admin',
         actor: 'ADMIN',
         action: 'ORDER_PLACED',
-        details: `Created new order #${orderRef.id.slice(0,6)} for ${customerData.name} (Qty: ${qty}, Amount: ₹${totalAmount})`,
+        details: `Created new ${mode === 'b2b' ? 'B2B' : ''} order #${orderRef.id.slice(0,6)} for ${customerData.name} (Qty: ${qty}, Amount: ₹${totalAmount})`,
         targetId: orderRef.id,
       });
 
       alert(`Order created successfully for ${customerData.name}`);
-      router.push('/admin/orders');
+      router.push(mode === 'b2b' ? `/admin/b2b/${customerId}` : '/admin/orders');
 
     } catch (error: any) {
       console.error(error);
@@ -419,12 +476,40 @@ export default function CreateOrderPage() {
 
       <ModeTabs>
         <ModeTab $active={mode === 'existing'} onClick={() => setMode('existing')}>
-          <FiUsers size={18} /> Existing Customer
+          <FiUsers size={18} /> Retail Customer
+        </ModeTab>
+        <ModeTab $active={mode === 'b2b'} onClick={() => setMode('b2b')}>
+          <FiBriefcase size={18} /> Enterprise (B2B)
         </ModeTab>
         <ModeTab $active={mode === 'new'} onClick={() => setMode('new')}>
-          <FiUserPlus size={18} /> New Customer
+          <FiUserPlus size={18} /> One-time Guest
         </ModeTab>
       </ModeTabs>
+
+      {mode === 'b2b' && (
+        <Section>
+          <SectionTitle>Enterprise Client</SectionTitle>
+          {b2bClient ? (
+            <SelectedCustomerCard>
+              <CustomerInfo>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FiBriefcase color="#3b82f6" />
+                  <CustomerName>{b2bClient.companyName}</CustomerName>
+                </div>
+                <CustomerPhone>{b2bClient.contactPerson?.name} • {b2bClient.contactPerson?.phone}</CustomerPhone>
+              </CustomerInfo>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>CONTRACT PRICE</div>
+                <div style={{ color: '#3b82f6', fontWeight: 700 }}>₹{b2bClient.contractTerms?.pricePerJar}/jar</div>
+              </div>
+            </SelectedCustomerCard>
+          ) : (
+             <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>
+               Please select a client from the B2B Dashboard.
+             </div>
+          )}
+        </Section>
+      )}
 
       {mode === 'existing' && (
         <Section>
@@ -551,6 +636,15 @@ export default function CreateOrderPage() {
             <div style={{ fontSize: '13px', color: '#6b7280' }}>Additional ₹7.00 surcharge</div>
           </div>
         </CheckboxLabel>
+
+        <FormGroup style={{ marginTop: '16px' }}>
+          <Label>Order Notes / Special Instructions</Label>
+          <Input 
+            placeholder="E.g., Delivery after 2 PM, Floor 3 without lift..." 
+            value={notes} 
+            onChange={e => setNotes(e.target.value)} 
+          />
+        </FormGroup>
 
         <TotalRow>
           <div style={{ fontSize: '18px', fontWeight: 600, color: '#374151' }}>Total Amount</div>

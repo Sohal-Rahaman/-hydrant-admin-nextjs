@@ -43,10 +43,11 @@ interface MergedMember extends ProMembership {
 }
 
 const PRO_PLANS = {
-  lite: { id: 'lite', name: 'Standard', fee: 15, maxJars: 7, pricePerJar: 37, overageFee: 40 },
-  pro: { id: 'pro', name: 'Smart', fee: 30, maxJars: 15, pricePerJar: 37, overageFee: 40 },
-  proMax: { id: 'proMax', name: 'Unlimited', fee: 55, maxJars: 999999, pricePerJar: 37, overageFee: 0 }
+  lite:   { id: 'lite',   name: 'Standard Refill',          fee: 15, maxJars: 7,      pricePerJar: 37, overageFee: 40 },
+  pro:    { id: 'pro',    name: 'Smart Refill Family Plan',  fee: 35, maxJars: 30,     pricePerJar: 37, overageFee: 40 },
+  proMax: { id: 'proMax', name: 'Unlimited Refill',          fee: 55, maxJars: 999999, pricePerJar: 37, overageFee: 0  },
 };
+
 
 export default function ProControlCenter() {
   const [members, setMembers] = useState<MergedMember[]>([]);
