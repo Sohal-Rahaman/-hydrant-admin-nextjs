@@ -48,9 +48,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // ONE-TIME GLOBAL FORCE LOGOUT
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const isForcedOut = localStorage.getItem('global_force_logout_v1');
+      const isForcedOut = localStorage.getItem('global_force_logout_v2'); // updated to v2 to ensure it fires
       if (!isForcedOut) {
-        localStorage.setItem('global_force_logout_v1', 'true');
+        localStorage.setItem('global_force_logout_v2', 'true');
         logOut().then(() => {
           setIsManualAuth(false);
           sessionStorage.removeItem('hydrant_manual_auth');
